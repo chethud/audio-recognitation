@@ -1,0 +1,67 @@
+# ALM / ALM-Lite Configuration
+
+# SQLite is the default database: data/alm.db (tables: inferences, analyze_logs, …)
+# Optional: set environment ALM_USE_SUPABASE=1 and Supabase credentials to mirror /analyze to the cloud.
+
+project:
+  name: alm-audio-language-model
+  output_dir: outputs
+  seed: 42
+
+data:
+  train_split: 0.9
+  sample_rate: 16000
+  max_audio_length_sec: 0   # 0 = no limit, analyze full file; set e.g. 30 to limit to 30 seconds
+  train_json: data/train.jsonl
+  val_json: data/val.jsonl
+
+# --- ALM-Lite (Modular) pipeline: ASR + SED + Context + LLM ---
+alm_lite:
+  asr:
+    model_id: "openai/whisper-small"  # whisper-tiny, whisper-base, whisper-small for multilingual
+    language: null   # e.g. "hi", "en", "ta"; null = auto-detect
+  sed:
+    model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
+    top_k: 10
+    threshold: 0.2
+  emotion:
+    enabled: true
+    model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
+  llm:
+    model_id: "Qwen/Qwen2-0.5B-Instruct"  # or Mistral, LLaMA
+    max_new_tokens: 256
+    repetition_penalty: 1.2
+    no_repeat_ngram_size: 4
+
+# --- Original ALM (end-to-end audio encoder + LLM) ---
+audio_encoder:
+  type: hubert
+  model_name: "facebook/hubert-base-ls960"
+  freeze_encoder: true
+
+llm:
+  model_name: "Qwen/Qwen2-0.5B-Instruct"
+  max_new_tokens: 256
+  repetition_penalty: 1.2
+  no_repeat_ngram_size: 4
+  use_4bit: false
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 2e-5
+  num_epochs: 3
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  use_cpu: true  # set false for GPU (needs ~8GB+ VRAM)
+
+# Optional CNN checkpoints (train with `python -m training.train_sed` / `train_emotion`)
+# Sound: ESC-50 as manageable AudioSet-style subset -> outputs/sed_cnn.pt
+# Emotion: RAVDESS Speech -> outputs/emotion_cnn.pt
+alm_cnn:
+  sed_checkpoint: outputs/sed_cnn.pt
+  emotion_checkpoint: outputs/emotion_cnn.pt
+  merged_checkpoint: outputs/alm_cnn_merged.pt
+  sed_metrics_json: outputs/sed_metrics.json
+  emotion_metrics_json: outputs/emotion_metrics.json
+  merged_metrics_json: outputs/alm_cnn_merged_metrics.json
