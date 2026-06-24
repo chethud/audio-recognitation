@@ -16,7 +16,7 @@ from src.env_setup import configure_ml_env
 configure_ml_env()
 
 import yaml
-from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
+from fastapi import BackgroundTasks, Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
@@ -80,6 +80,40 @@ MAX_FILE_SIZE_MB = 500
 MAX_QUESTION_LEN = 1000
 INFERENCE_TIMEOUT_SEC = 3600  # 1 hour for long files (full-file analysis)
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".mp4", ".mkv", ".webm", ".avi", ".mov"}
+
+
+def _alm_settings() -> dict:
+    try:
+        with open(CONFIG_PATH, encoding="utf-8") as f:
+            return yaml.safe_load(f).get("alm_lite", {})
+    except Exception:
+        return {}
+
+
+def _save_analyze_log_async(
+    *,
+    audio_filename: str,
+    question: str,
+    transcript: str,
+    sounds: list[str],
+    emotion: str,
+    answer: str,
+    audio_data: bytes | None,
+    audio_mime: str | None,
+) -> None:
+    try:
+        database.save_analyze_log(
+            audio_filename=audio_filename,
+            question=question,
+            transcript=transcript,
+            sounds=sounds,
+            emotion=emotion,
+            answer=answer,
+            audio_data=audio_data,
+            audio_mime=audio_mime,
+        )
+    except Exception as e:
+        logger.warning("SQLite analyze_logs save failed: %s", e)
 
 
 @app.exception_handler(Exception)
@@ -183,12 +217,12 @@ def startup():
     database.init_db()
     if not _use_subprocess_inference():
         logger.info(
-            "Loading AI models into memory (fast_mode loads Whisper only; "
-            "wait ~30–90s on first start)…"
+            "Loading full AI stack (Whisper + SED + emotion + LLM). "
+            "First start may take 3–5 minutes; keep this window open…"
         )
         try:
             inference_service.warmup()
-            logger.info("All models loaded — ready for fast inference.")
+            logger.info("All models loaded — ready for analysis.")
         except Exception:
             logger.exception("Model warmup failed")
 
@@ -332,6 +366,7 @@ async def inference(
 
 @app.post("/analyze", response_model=AnalyzeResponse)
 async def analyze(
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     question: str = Form("What can be inferred from the audio?"),
 ):
@@ -382,22 +417,19 @@ async def analyze(
     sounds = _sound_events_to_labels(result.get("sound_events") or [])
     emotion = result.get("emotion", "") or "neutral"
 
-    sqlite_id = 0
-    try:
-        sqlite_id = database.save_analyze_log(
-            audio_filename=file.filename,
-            question=question.strip(),
-            transcript=transcript,
-            sounds=sounds,
-            emotion=emotion,
-            answer=answer,
-            audio_data=content,
-            audio_mime=_mime_for_suffix(suffix),
-        )
-    except Exception as e:
-        logger.warning("SQLite analyze_logs save failed: %s", e)
-
-    log_id_out = str(sqlite_id) if sqlite_id else None
+    alm = _alm_settings()
+    store_audio = bool(alm.get("store_uploaded_audio", False))
+    background_tasks.add_task(
+        _save_analyze_log_async,
+        audio_filename=file.filename,
+        question=question.strip(),
+        transcript=transcript,
+        sounds=sounds,
+        emotion=emotion,
+        answer=answer,
+        audio_data=content if store_audio else None,
+        audio_mime=_mime_for_suffix(suffix) if store_audio else None,
+    )
 
     return AnalyzeResponse(
         transcript=transcript,
@@ -406,7 +438,7 @@ async def analyze(
         answer=answer,
         question=question.strip(),
         audio_filename=file.filename,
-        log_id=log_id_out,
+        log_id=None,
     )
 
 

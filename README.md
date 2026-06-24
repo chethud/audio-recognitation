@@ -2,6 +2,8 @@
 
 Speech (ASR), environmental sounds (SED), speaker emotion, and LLM reasoning over a unified API and optional React UI.
 
+**Full project guide** (setup, workflow, API, commands, troubleshooting): see **[README_FULL_PROJECT.md](README_FULL_PROJECT.md)**.
+
 ---
 
 ## Model stack (inference — default)

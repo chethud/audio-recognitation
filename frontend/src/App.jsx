@@ -1,5 +1,6 @@
 import { BrowserRouter, Navigate, Route, Routes } from "react-router-dom";
 import { AuthProvider, useAuth } from "./context/AuthContext.jsx";
+import GlassBackground from "./components/GlassBackground.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
 import Signup from "./pages/Signup.jsx";
@@ -8,9 +9,12 @@ function AppRoutes() {
   const { ready } = useAuth();
   if (!ready) {
     return (
-      <div className="min-h-screen bg-slate-950 flex items-center justify-center text-slate-400 text-sm">
-        Loading…
-      </div>
+      <GlassBackground className="flex items-center justify-center">
+        <div className="glass-panel px-8 py-6 flex items-center gap-3 text-slate-300 text-sm">
+          <span className="h-5 w-5 rounded-full border-2 border-cyan-400/30 border-t-cyan-300 animate-spin" />
+          Loading…
+        </div>
+      </GlassBackground>
     );
   }
   return (

@@ -61,7 +61,7 @@ def main():
 
         data_cfg = cfg.get("data", {})
         alm = cfg.get("alm_lite", {})
-        fast = bool(alm.get("fast_mode", True))
+        fast = bool(alm.get("fast_mode", False))
         asr_cfg = alm.get("asr", {})
         sed_cfg = alm.get("sed", {})
         llm_cfg = alm.get("llm", {})
@@ -70,7 +70,7 @@ def main():
         audio = load_audio_from_file(
             audio_path,
             sr=data_cfg.get("sample_rate", 16000),
-            max_sec=data_cfg.get("max_audio_length_sec", 15),
+            max_sec=data_cfg.get("max_audio_length_sec", 12),
         )
         # (1, L) -> (L,) for pipeline
         if audio.dim() == 2:
@@ -84,15 +84,15 @@ def main():
             asr_language=asr_cfg.get("language"),
             sed_model_id=sed_cfg.get("model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"),
             sed_top_k=sed_cfg.get("top_k", 3),
-            sed_threshold=sed_cfg.get("threshold", 0.3),
+            sed_threshold=sed_cfg.get("threshold", 0.35),
             llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
-            max_new_tokens=llm_cfg.get("max_new_tokens", 48),
+            max_new_tokens=llm_cfg.get("max_new_tokens", 32),
             repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
-            no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 3),
+            no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 2),
             emotion_model_id=emo_cfg.get("model_id"),
-            emotion_enabled=emo_cfg.get("enabled", False),
-            sed_enabled=sed_cfg.get("enabled", False),
-            llm_enabled=llm_cfg.get("enabled", False),
+            emotion_enabled=emo_cfg.get("enabled", True),
+            sed_enabled=sed_cfg.get("enabled", True),
+            llm_enabled=llm_cfg.get("enabled", True),
             fast_mode=fast,
         )
 

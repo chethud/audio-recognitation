@@ -45,18 +45,11 @@ export default function Signup() {
   return (
     <AuthLayout title="Create account" subtitle="Join ALM-Lite">
       <form onSubmit={onSubmit} className="space-y-4">
-        {error ? (
-          <p
-            className="rounded-lg bg-red-950/50 border border-red-900/60 text-red-200 text-sm px-3 py-2"
-            role="alert"
-          >
-            {error}
-          </p>
-        ) : null}
+        {error ? <p className="glass-error" role="alert">{error}</p> : null}
         <div>
           <label
             htmlFor="signup-email"
-            className="block text-sm text-slate-400 mb-1"
+            className="block text-sm text-slate-300/80 mb-1.5"
           >
             Email
           </label>
@@ -68,14 +61,14 @@ export default function Signup() {
             required
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50"
+            className="glass-input"
             placeholder="you@example.com"
           />
         </div>
         <div>
           <label
             htmlFor="signup-password"
-            className="block text-sm text-slate-400 mb-1"
+            className="block text-sm text-slate-300/80 mb-1.5"
           >
             Password
           </label>
@@ -88,14 +81,14 @@ export default function Signup() {
             minLength={8}
             value={password}
             onChange={(e) => setPassword(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50"
+            className="glass-input"
             placeholder="At least 8 characters"
           />
         </div>
         <div>
           <label
             htmlFor="signup-confirm"
-            className="block text-sm text-slate-400 mb-1"
+            className="block text-sm text-slate-300/80 mb-1.5"
           >
             Confirm password
           </label>
@@ -107,15 +100,11 @@ export default function Signup() {
             required
             value={confirm}
             onChange={(e) => setConfirm(e.target.value)}
-            className="w-full rounded-lg border border-slate-700 bg-slate-950/80 px-3 py-2 text-white placeholder-slate-600 focus:outline-none focus:ring-2 focus:ring-cyan-500/40 focus:border-cyan-500/50"
+            className="glass-input"
             placeholder="Repeat password"
           />
         </div>
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 disabled:pointer-events-none text-white font-display font-semibold py-2.5 transition-colors"
-        >
+        <button type="submit" disabled={loading} className="glass-btn w-full">
           {loading ? "Creating account…" : "Sign up"}
         </button>
       </form>

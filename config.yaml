@@ -10,30 +10,31 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 15   # shorter clip = faster; 0 = full file (slow)
+  max_audio_length_sec: 12   # first 12s only (fast decode); increase for longer analysis
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
-# --- ALM-Lite (Modular) pipeline: ASR + SED + Context + LLM ---
+# --- ALM-Lite: full AI pipeline (ASR + SED + emotion + LLM), speed-optimized ---
 alm_lite:
-  fast_mode: true   # true = ASR only + instant answer (seconds on CPU); false = full SED + LLM (slow)
+  fast_mode: false   # false = full analysis with LLM reasoning
+  store_uploaded_audio: false
   asr:
-    model_id: "openai/whisper-tiny"   # fastest; use whisper-small for better accuracy
-    language: null   # e.g. "en" skips auto-detect and speeds up Whisper
+    model_id: "openai/whisper-tiny"
+    language: null   # set "en" for faster English-only
   sed:
-    enabled: false   # AST model is heavy on CPU; enable with fast_mode: false
+    enabled: true
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
     top_k: 3
-    threshold: 0.3
+    threshold: 0.35
   emotion:
-    enabled: false
+    enabled: true
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
-    enabled: false   # Qwen is slow on CPU; enable with fast_mode: false
+    enabled: true
     model_id: "Qwen/Qwen2-0.5B-Instruct"
-    max_new_tokens: 48
+    max_new_tokens: 32
     repetition_penalty: 1.1
-    no_repeat_ngram_size: 3
+    no_repeat_ngram_size: 2
 
 training:
   batch_size: 1
@@ -42,11 +43,8 @@ training:
   num_epochs: 3
   warmup_ratio: 0.1
   weight_decay: 0.01
-  use_cpu: true  # set false for GPU (needs ~8GB+ VRAM)
+  use_cpu: true
 
-# Optional CNN checkpoints (train with `python -m training.train_sed` / `train_emotion`)
-# Sound: ESC-50 as manageable AudioSet-style subset -> outputs/sed_cnn.pt
-# Emotion: RAVDESS Speech -> outputs/emotion_cnn.pt
 alm_cnn:
   sed_checkpoint: outputs/sed_cnn.pt
   emotion_checkpoint: outputs/emotion_cnn.pt

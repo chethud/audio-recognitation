@@ -70,7 +70,7 @@ def answer_question_from_context(
     context: str,
     question: str,
     model_id: str = "Qwen/Qwen2-0.5B-Instruct",
-    max_new_tokens: int = 80,
+    max_new_tokens: int = 32,
     repetition_penalty: float = 1.1,
     no_repeat_ngram_size: int = 3,
     device: Optional[torch.device] = None,
@@ -81,18 +81,16 @@ def answer_question_from_context(
     tokenizer, model = _get_llm(model_id, device)
 
     # Keep prompt short for faster generation on CPU.
-    if len(context) > 1500:
-        context = context[:1500] + "…"
+    if len(context) > 800:
+        context = context[:800] + "…"
 
     prompt = (
-        "You are an assistant that answers questions about an audio scene based on "
-        "the following context (speech transcript and environmental sounds).\n\n"
+        "Answer briefly from this audio context.\n\n"
         "Context:\n{context}\n\n"
-        "Question: {question}\n\n"
-        "Answer:"
+        "Q: {question}\nA:"
     ).format(context=context, question=question)
 
-    enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=768).to(device)
+    enc = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=512).to(device)
     pad_id = tokenizer.pad_token_id or tokenizer.eos_token_id
     eos_id = tokenizer.eos_token_id or pad_id
 

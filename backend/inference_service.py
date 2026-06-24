@@ -4,6 +4,7 @@ In-process ALM-Lite inference with model warmup and reuse (much faster than per-
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import Any, Optional
 
@@ -54,22 +55,28 @@ def warmup() -> None:
         llm_cfg = alm.get("llm", {})
 
         import torch
+
+        torch.set_grad_enabled(False)
+        if not torch.cuda.is_available():
+            threads = min(4, max(1, (os.cpu_count() or 4) // 2))
+            torch.set_num_threads(threads)
+
         from src.asr.whisper_asr import _get_asr_pipe
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        mode = "fast (ASR only)" if fast else "full"
+        mode = "fast (ASR only)" if fast else "full (ASR + SED + emotion + LLM)"
         logger.info("Warming up models [%s] on %s …", mode, device)
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if not fast and sed_cfg.get("enabled", False):
+        if not fast and sed_cfg.get("enabled", True):
             from src.sed.sed_module import _get_sed_pipe
 
             _get_sed_pipe(
                 sed_cfg.get("model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"),
                 device,
             )
-        if not fast and emo_cfg.get("enabled", False):
+        if not fast and emo_cfg.get("enabled", True):
             from src.emotion.emotion_module import _get_emotion_pipeline
 
             _get_emotion_pipeline(
@@ -79,7 +86,7 @@ def warmup() -> None:
                 ),
                 device,
             )
-        if not fast and llm_cfg.get("enabled", False):
+        if not fast and llm_cfg.get("enabled", True):
             from src.reasoning.llm_reasoning import _get_llm
 
             _get_llm(llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"), device)
@@ -105,17 +112,19 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
     sed_cfg = alm.get("sed", {})
     llm_cfg = alm.get("llm", {})
     emo_cfg = alm.get("emotion", {})
+    max_sec = data_cfg.get("max_audio_length_sec", 10)
+
+    # Decode only the first N seconds (do not hold model lock while loading file).
+    audio = load_audio_from_file(
+        audio_path,
+        sr=data_cfg.get("sample_rate", 16000),
+        max_sec=max_sec,
+    )
+    if audio.dim() == 2:
+        audio = audio.squeeze(0)
 
     with _lock:
         try:
-            audio = load_audio_from_file(
-                audio_path,
-                sr=data_cfg.get("sample_rate", 16000),
-                max_sec=data_cfg.get("max_audio_length_sec", 15),
-            )
-            if audio.dim() == 2:
-                audio = audio.squeeze(0)
-
             result = run_alm_lite(
                 audio.numpy(),
                 question,
@@ -126,15 +135,15 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                     "model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"
                 ),
                 sed_top_k=sed_cfg.get("top_k", 3),
-                sed_threshold=sed_cfg.get("threshold", 0.3),
+                sed_threshold=sed_cfg.get("threshold", 0.35),
                 llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
-                max_new_tokens=llm_cfg.get("max_new_tokens", 48),
+                max_new_tokens=llm_cfg.get("max_new_tokens", 32),
                 repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
-                no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 3),
+                no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 2),
                 emotion_model_id=emo_cfg.get("model_id"),
-                emotion_enabled=emo_cfg.get("enabled", False),
-                sed_enabled=sed_cfg.get("enabled", False),
-                llm_enabled=llm_cfg.get("enabled", False),
+                emotion_enabled=emo_cfg.get("enabled", True),
+                sed_enabled=sed_cfg.get("enabled", True),
+                llm_enabled=llm_cfg.get("enabled", True),
                 fast_mode=fast,
             )
             return {

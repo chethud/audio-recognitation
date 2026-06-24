@@ -1,6 +1,5 @@
 """
-Modular ALM-Lite pipeline: joint speech and non-speech understanding with reasoning.
-Flow: Audio → ASR (+ optional SED/emotion in parallel) → Context → LLM or fast answer.
+Modular ALM-Lite pipeline: ASR + SED + emotion (parallel) → context → LLM answer.
 """
 from __future__ import annotations
 
@@ -25,26 +24,20 @@ def run_alm_lite(
     asr_model_id: str = "openai/whisper-tiny",
     sed_model_id: str = "MIT/ast-finetuned-audioset-10-10-0.4593",
     llm_model_id: str = "Qwen/Qwen2-0.5B-Instruct",
-    max_new_tokens: int = 48,
+    max_new_tokens: int = 32,
     repetition_penalty: float = 1.1,
-    no_repeat_ngram_size: int = 3,
+    no_repeat_ngram_size: int = 2,
     device: Optional[Union[str, torch.device]] = None,
     asr_language: Optional[str] = None,
     sed_top_k: int = 3,
-    sed_threshold: float = 0.3,
+    sed_threshold: float = 0.35,
     include_sed_scores: bool = False,
     emotion_model_id: Optional[str] = None,
-    emotion_enabled: bool = False,
-    sed_enabled: bool = False,
-    llm_enabled: bool = False,
-    fast_mode: bool = True,
+    emotion_enabled: bool = True,
+    sed_enabled: bool = True,
+    llm_enabled: bool = True,
+    fast_mode: bool = False,
 ) -> Dict[str, Any]:
-    """
-    Run the full ALM-Lite modular pipeline on one audio and one question.
-
-    Returns:
-        dict with keys: transcript, sound_events, emotion, context, answer
-    """
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -55,7 +48,7 @@ def run_alm_lite(
 
     emo_id = emotion_model_id or "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
 
-    if not sed_enabled and not emotion_enabled:
+    if fast_mode:
         transcript = transcribe_audio(
             audio,
             sample_rate=sample_rate,
@@ -66,6 +59,7 @@ def run_alm_lite(
         sound_events: list = []
         emotion_label = "neutral"
     else:
+        # Full mode: run ASR, SED, and emotion at the same time (fastest on CPU).
         with ThreadPoolExecutor(max_workers=3) as pool:
             f_asr = pool.submit(
                 transcribe_audio,
@@ -100,7 +94,6 @@ def run_alm_lite(
                 if emotion_enabled
                 else None
             )
-
             transcript = f_asr.result()
             sound_events = f_sed.result() if f_sed else []
             emotion_label = f_emo.result() if f_emo else "neutral"

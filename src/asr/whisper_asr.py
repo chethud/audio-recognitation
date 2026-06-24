@@ -7,7 +7,6 @@ from src.env_setup import configure_ml_env
 
 configure_ml_env()
 
-# Before any `transformers` import (notebooks / scripts that skip the worker).
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
 
@@ -31,7 +30,13 @@ def _get_asr_pipe(model_id: str, device: Union[str, torch.device]):
         if key in _pipe_cache:
             return _pipe_cache[key]
         from transformers import pipeline
-        p = pipeline("automatic-speech-recognition", model=model_id, device=dev)
+
+        p = pipeline(
+            "automatic-speech-recognition",
+            model=model_id,
+            device=dev,
+            torch_dtype=torch.float16 if dev == 0 else torch.float32,
+        )
         _pipe_cache[key] = p
         return p
 
@@ -40,7 +45,7 @@ def transcribe_audio(
     audio: Union[torch.Tensor, np.ndarray],
     *,
     sample_rate: int = 16000,
-    model_id: str = "openai/whisper-small",
+    model_id: str = "openai/whisper-tiny",
     device: Optional[Union[str, torch.device]] = None,
     language: Optional[str] = None,
 ) -> str:
@@ -52,12 +57,28 @@ def transcribe_audio(
     else:
         wav = np.asarray(audio, dtype=np.float32).reshape(-1)
 
+    duration_s = len(wav) / max(sample_rate, 1)
     pipe = _get_asr_pipe(model_id, device)
-    kwargs: dict = {"chunk_length_s": 15, "batch_size": 8}
+
+    # Short clips: single pass (no chunking overhead). Longer: chunked.
+    if duration_s <= 30:
+        pipe_kwargs: dict = {}
+    else:
+        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 4, "stride_length_s": 5}
+
+    gen_kwargs: dict = {
+        "task": "transcribe",
+        "condition_on_prev_tokens": False,
+    }
     if language:
-        kwargs["generate_kwargs"] = {"language": language, "task": "transcribe"}
+        gen_kwargs["language"] = language
+
     try:
-        out = pipe({"array": wav, "sampling_rate": sample_rate}, **kwargs)
+        out = pipe(
+            {"array": wav, "sampling_rate": sample_rate},
+            generate_kwargs=gen_kwargs,
+            **pipe_kwargs,
+        )
         text = out.get("text", "") if isinstance(out, dict) else str(out)
         return (text or "").strip()
     except Exception as e:
