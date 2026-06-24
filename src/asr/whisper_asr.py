@@ -3,6 +3,10 @@ from __future__ import annotations
 
 import os
 
+from src.env_setup import configure_ml_env
+
+configure_ml_env()
+
 # Before any `transformers` import (notebooks / scripts that skip the worker).
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
@@ -49,9 +53,9 @@ def transcribe_audio(
         wav = np.asarray(audio, dtype=np.float32).reshape(-1)
 
     pipe = _get_asr_pipe(model_id, device)
-    kwargs = {}
+    kwargs: dict = {"chunk_length_s": 15, "batch_size": 8}
     if language:
-        kwargs["generate_kwargs"] = {"language": language}
+        kwargs["generate_kwargs"] = {"language": language, "task": "transcribe"}
     try:
         out = pipe({"array": wav, "sampling_rate": sample_rate}, **kwargs)
         text = out.get("text", "") if isinstance(out, dict) else str(out)

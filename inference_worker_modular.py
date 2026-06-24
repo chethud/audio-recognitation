@@ -7,10 +7,15 @@ import os
 import sys
 from pathlib import Path
 
+from src.env_setup import configure_ml_env
+
+configure_ml_env()
+
 # PyTorch-only: avoid loading TF/Keras Whisper (Keras 3 breaks TF models in Transformers).
 os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
 os.environ.setdefault("USE_TF", "0")
 os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")
+os.environ.setdefault("HF_HUB_DISABLE_SYMLINKS_WARNING", "1")
 
 BASE = Path(__file__).parent
 sys.path.insert(0, str(BASE))
@@ -56,6 +61,7 @@ def main():
 
         data_cfg = cfg.get("data", {})
         alm = cfg.get("alm_lite", {})
+        fast = bool(alm.get("fast_mode", True))
         asr_cfg = alm.get("asr", {})
         sed_cfg = alm.get("sed", {})
         llm_cfg = alm.get("llm", {})
@@ -64,7 +70,7 @@ def main():
         audio = load_audio_from_file(
             audio_path,
             sr=data_cfg.get("sample_rate", 16000),
-            max_sec=data_cfg.get("max_audio_length_sec", 30),
+            max_sec=data_cfg.get("max_audio_length_sec", 15),
         )
         # (1, L) -> (L,) for pipeline
         if audio.dim() == 2:
@@ -74,17 +80,20 @@ def main():
             audio.numpy(),
             question,
             sample_rate=data_cfg.get("sample_rate", 16000),
-            asr_model_id=asr_cfg.get("model_id", "openai/whisper-small"),
+            asr_model_id=asr_cfg.get("model_id", "openai/whisper-tiny"),
             asr_language=asr_cfg.get("language"),
             sed_model_id=sed_cfg.get("model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"),
-            sed_top_k=sed_cfg.get("top_k", 10),
-            sed_threshold=sed_cfg.get("threshold", 0.2),
+            sed_top_k=sed_cfg.get("top_k", 3),
+            sed_threshold=sed_cfg.get("threshold", 0.3),
             llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
-            max_new_tokens=llm_cfg.get("max_new_tokens", 256),
-            repetition_penalty=llm_cfg.get("repetition_penalty", 1.2),
-            no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 4),
+            max_new_tokens=llm_cfg.get("max_new_tokens", 48),
+            repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
+            no_repeat_ngram_size=llm_cfg.get("no_repeat_ngram_size", 3),
             emotion_model_id=emo_cfg.get("model_id"),
-            emotion_enabled=emo_cfg.get("enabled", True),
+            emotion_enabled=emo_cfg.get("enabled", False),
+            sed_enabled=sed_cfg.get("enabled", False),
+            llm_enabled=llm_cfg.get("enabled", False),
+            fast_mode=fast,
         )
 
         write_out({

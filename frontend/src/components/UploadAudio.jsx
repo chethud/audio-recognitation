@@ -1,3 +1,5 @@
+import { useEffect, useState } from "react";
+
 export default function UploadAudio({
   file,
   onFileChange,
@@ -7,6 +9,18 @@ export default function UploadAudio({
   loading,
   disabled,
 }) {
+  const [previewUrl, setPreviewUrl] = useState(null);
+
+  useEffect(() => {
+    if (!file) {
+      setPreviewUrl(null);
+      return;
+    }
+    const url = URL.createObjectURL(file);
+    setPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [file]);
+
   return (
     <div className="space-y-6">
       <div>
@@ -19,6 +33,21 @@ export default function UploadAudio({
           onChange={(e) => onFileChange(e.target.files?.[0] || null)}
           className="block w-full text-sm text-slate-300 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-cyan-500/20 file:text-cyan-200 hover:file:bg-cyan-500/30 cursor-pointer"
         />
+        {file && previewUrl && (
+          <div className="mt-4 rounded-xl border border-slate-700 bg-slate-900/60 p-4">
+            <p className="text-sm text-slate-400 mb-3 truncate" title={file.name}>
+              {file.name}
+            </p>
+            <audio
+              controls
+              src={previewUrl}
+              className="w-full h-10 accent-cyan-500"
+              preload="metadata"
+            >
+              Your browser does not support audio playback.
+            </audio>
+          </div>
+        )}
       </div>
       <div>
         <label className="block text-sm font-medium text-slate-400 mb-2">

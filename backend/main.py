@@ -1,7 +1,6 @@
 """
 ALM Backend API - Robust, crash-resistant design.
-Runs inference in a separate subprocess so API never OOMs or corrupts.
-Persistence: SQLite at data/alm.db (see backend/database.py). Optional Supabase mirror if ALM_USE_SUPABASE=1.
+Runs inference in-process with cached models (fast). Persistence: SQLite at data/alm.db.
 """
 import json
 import logging
@@ -12,24 +11,18 @@ import sys
 import tempfile
 from pathlib import Path
 
-# Project-root .env (SUPABASE_URL, keys, ALM_USE_SUPABASE)
-_env_file = Path(__file__).resolve().parent.parent / ".env"
-if _env_file.is_file():
-    try:
-        from dotenv import load_dotenv
+from src.env_setup import configure_ml_env
 
-        load_dotenv(_env_file)
-    except ImportError:
-        pass
+configure_ml_env()
 
 import yaml
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from backend import database
-from backend import supabase_client
+from backend import inference_service
 from backend.models import (
     AnalyzeLogItem,
     AnalyzeResponse,
@@ -80,7 +73,6 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 
 BASE = Path(__file__).parent.parent
 CONFIG_PATH = BASE / "config.yaml"
-WORKER_SCRIPT = BASE / "inference_worker.py"
 WORKER_SCRIPT_MODULAR = BASE / "inference_worker_modular.py"
 
 # Limits (no audio length limit; full file is analyzed)
@@ -112,10 +104,13 @@ def _run_worker(script_path: Path, audio_path: str, question: str, output_path: 
             text=True,
             timeout=INFERENCE_TIMEOUT_SEC,
             env={
-                **__import__("os").environ,
+                **os.environ,
                 "TF_CPP_MIN_LOG_LEVEL": "3",
                 "TRANSFORMERS_NO_TF": "1",
                 "USE_TF": "0",
+                "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
+                "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+                "TRANSFORMERS_VERBOSITY": "error",
             },
         )
         if Path(output_path).exists():
@@ -138,12 +133,24 @@ def _run_worker(script_path: Path, audio_path: str, question: str, output_path: 
         return {"ok": False, "error": f"{type(e).__name__}: {str(e)}"}
 
 
-def _run_inference_worker(audio_path: str, question: str, output_path: str, question_file: str) -> dict:
-    return _run_worker(WORKER_SCRIPT, audio_path, question, output_path, question_file)
+def _use_subprocess_inference() -> bool:
+    return os.getenv("ALM_SUBPROCESS_INFERENCE", "").strip().lower() in ("1", "true", "yes")
+
+
+def _run_modular_inference(audio_path: str, question: str, output_path: str, question_file: str) -> dict:
+    """Run ALM-Lite; in-process with cached models by default (fast)."""
+    if _use_subprocess_inference():
+        return _run_worker(WORKER_SCRIPT_MODULAR, audio_path, question, output_path, question_file)
+    if not inference_service.is_ready():
+        raise HTTPException(
+            503,
+            "Models are still loading. Wait until /health returns model_ready=true, then retry.",
+        )
+    return inference_service.analyze_file(audio_path, question)
 
 
 def _run_inference_worker_modular(audio_path: str, question: str, output_path: str, question_file: str) -> dict:
-    return _run_worker(WORKER_SCRIPT_MODULAR, audio_path, question, output_path, question_file)
+    return _run_modular_inference(audio_path, question, output_path, question_file)
 
 
 def _sound_events_to_labels(sound_events: list) -> list[str]:
@@ -157,11 +164,6 @@ def _sound_events_to_labels(sound_events: list) -> list[str]:
         elif isinstance(e, str):
             out.append(e)
     return out
-
-
-def _use_supabase_mirror() -> bool:
-    """Optional cloud mirror; default is SQLite-only."""
-    return os.getenv("ALM_USE_SUPABASE", "").strip().lower() in ("1", "true", "yes") and supabase_client.is_configured()
 
 
 def _mime_for_suffix(suffix: str) -> str:
@@ -178,20 +180,23 @@ def _mime_for_suffix(suffix: str) -> str:
 
 @app.on_event("startup")
 def startup():
-    # Child inference workers inherit env; also set in subprocess.run below.
-    os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
-    os.environ.setdefault("USE_TF", "0")
     database.init_db()
+    if not _use_subprocess_inference():
+        logger.info(
+            "Loading AI models into memory (fast_mode loads Whisper only; "
+            "wait ~30–90s on first start)…"
+        )
+        try:
+            inference_service.warmup()
+            logger.info("All models loaded — ready for fast inference.")
+        except Exception:
+            logger.exception("Model warmup failed")
 
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    try:
-        if WORKER_SCRIPT.exists():
-            return HealthResponse(status="ok", model_ready=True)
-    except Exception:
-        pass
-    return HealthResponse(status="ok", model_ready=WORKER_SCRIPT.exists())
+    ready = inference_service.is_ready() or _use_subprocess_inference()
+    return HealthResponse(status="ok", model_ready=ready)
 
 
 @app.post("/auth/signup", response_model=AuthResponse)
@@ -242,7 +247,10 @@ def auth_logout(credentials: HTTPAuthorizationCredentials | None = Depends(_auth
 async def inference(
     file: UploadFile = File(...),
     question: str = Form("What can be inferred from the audio?"),
-    use_modular: bool = Form(False, description="Use ALM-Lite modular pipeline (ASR + SED + LLM)"),
+    use_modular: bool = Form(
+        False,
+        description="When true, include transcript, sound_events, emotion, and context in the response",
+    ),
 ):
     # Validate
     if not file.filename or not file.filename.strip():
@@ -272,14 +280,9 @@ async def inference(
         qfile = tmpdir / "question.txt"
         qfile.write_text(question.strip(), encoding="utf-8")
 
-        if use_modular:
-            result = _run_inference_worker_modular(
-                str(tmp_path), question.strip(), str(output_path), str(qfile)
-            )
-        else:
-            result = _run_inference_worker(
-                str(tmp_path), question.strip(), str(output_path), str(qfile)
-            )
+        result = _run_inference_worker_modular(
+            str(tmp_path), question.strip(), str(output_path), str(qfile)
+        )
 
     if not result.get("ok"):
         logger.warning("Inference failed: %s", result.get("error"))
@@ -301,6 +304,8 @@ async def inference(
             question=question.strip(),
             answer=answer,
             audio_duration_sec=duration_sec,
+            audio_data=content,
+            audio_mime=_mime_for_suffix(suffix),
         )
     except Exception as e:
         logger.warning("DB save failed (inference still returned): %s", e)
@@ -332,7 +337,7 @@ async def analyze(
 ):
     """
     ALM-Lite production endpoint: ASR + SED + emotion + LLM.
-    Results are stored in **SQLite** (`analyze_logs`). Set ``ALM_USE_SUPABASE=1`` to also mirror to Supabase.
+    Results and uploaded audio are stored in SQLite (`analyze_logs`).
     """
     if not file.filename or not file.filename.strip():
         raise HTTPException(400, "No file provided")
@@ -352,12 +357,6 @@ async def analyze(
     size_mb = len(content) / (1024 * 1024)
     if size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(400, f"File too large (max {MAX_FILE_SIZE_MB}MB)")
-
-    audio_url = None
-    if _use_supabase_mirror():
-        audio_url = supabase_client.upload_audio_bytes(
-            file.filename, content, content_type=_mime_for_suffix(suffix)
-        )
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
@@ -392,28 +391,13 @@ async def analyze(
             sounds=sounds,
             emotion=emotion,
             answer=answer,
+            audio_data=content,
+            audio_mime=_mime_for_suffix(suffix),
         )
     except Exception as e:
         logger.warning("SQLite analyze_logs save failed: %s", e)
 
-    supabase_log_id = None
-    if _use_supabase_mirror():
-        try:
-            supabase_log_id = supabase_client.insert_audio_log(
-                audio_url=audio_url,
-                transcript=transcript,
-                sounds=sounds,
-                emotion=emotion,
-                answer=answer,
-                question=question.strip(),
-            )
-        except Exception as e:
-            logger.warning("Supabase mirror failed: %s", e)
-
-    # Prefer SQLite id for clients; include Supabase id in response only when mirroring (as same field would be ambiguous — use SQLite as canonical)
     log_id_out = str(sqlite_id) if sqlite_id else None
-    if not log_id_out and supabase_log_id:
-        log_id_out = supabase_log_id
 
     return AnalyzeResponse(
         transcript=transcript,
@@ -441,6 +425,20 @@ def analyze_history_item(log_id: int):
     if not row:
         raise HTTPException(404, "Not found")
     return AnalyzeLogItem(**row)
+
+
+@app.get("/analyze/history/{log_id}/audio")
+def analyze_history_audio(log_id: int):
+    """Download the uploaded audio file stored in SQLite for an analyze log."""
+    stored = database.get_analyze_audio(log_id)
+    if not stored:
+        raise HTTPException(404, "Audio not found for this log")
+    data, mime, filename = stored
+    return Response(
+        content=data,
+        media_type=mime,
+        headers={"Content-Disposition": f'inline; filename="{filename}"'},
+    )
 
 
 @app.get("/history", response_model=list[HistoryItem])

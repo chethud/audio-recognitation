@@ -7,6 +7,10 @@ from typing import List, Optional, Union
 import numpy as np
 import torch
 
+from src.env_setup import configure_ml_env
+
+configure_ml_env()
+
 _lock = threading.Lock()
 _pipe_cache: dict[str, object] = {}
 

@@ -1,7 +1,6 @@
 # ALM / ALM-Lite Configuration
 
-# SQLite is the default database: data/alm.db (tables: inferences, analyze_logs, …)
-# Optional: set environment ALM_USE_SUPABASE=1 and Supabase credentials to mirror /analyze to the cloud.
+# SQLite is the default database: data/alm.db (tables: inferences, analyze_logs, users, …)
 
 project:
   name: alm-audio-language-model
@@ -11,40 +10,30 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 0   # 0 = no limit, analyze full file; set e.g. 30 to limit to 30 seconds
+  max_audio_length_sec: 15   # shorter clip = faster; 0 = full file (slow)
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
 # --- ALM-Lite (Modular) pipeline: ASR + SED + Context + LLM ---
 alm_lite:
+  fast_mode: true   # true = ASR only + instant answer (seconds on CPU); false = full SED + LLM (slow)
   asr:
-    model_id: "openai/whisper-small"  # whisper-tiny, whisper-base, whisper-small for multilingual
-    language: null   # e.g. "hi", "en", "ta"; null = auto-detect
+    model_id: "openai/whisper-tiny"   # fastest; use whisper-small for better accuracy
+    language: null   # e.g. "en" skips auto-detect and speeds up Whisper
   sed:
+    enabled: false   # AST model is heavy on CPU; enable with fast_mode: false
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 10
-    threshold: 0.2
+    top_k: 3
+    threshold: 0.3
   emotion:
-    enabled: true
+    enabled: false
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
-    model_id: "Qwen/Qwen2-0.5B-Instruct"  # or Mistral, LLaMA
-    max_new_tokens: 256
-    repetition_penalty: 1.2
-    no_repeat_ngram_size: 4
-
-# --- Original ALM (end-to-end audio encoder + LLM) ---
-audio_encoder:
-  type: hubert
-  model_name: "facebook/hubert-base-ls960"
-  freeze_encoder: true
-
-llm:
-  model_name: "Qwen/Qwen2-0.5B-Instruct"
-  max_new_tokens: 256
-  repetition_penalty: 1.2
-  no_repeat_ngram_size: 4
-  use_4bit: false
+    enabled: false   # Qwen is slow on CPU; enable with fast_mode: false
+    model_id: "Qwen/Qwen2-0.5B-Instruct"
+    max_new_tokens: 48
+    repetition_penalty: 1.1
+    no_repeat_ngram_size: 3
 
 training:
   batch_size: 1

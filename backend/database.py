@@ -44,6 +44,12 @@ def verify_password(password: str, salt_b64: str, hash_b64: str) -> bool:
 DB_PATH = Path(__file__).parent.parent / "data" / "alm.db"
 
 
+def _ensure_column(conn: sqlite3.Connection, table: str, column: str, col_def: str) -> None:
+    cols = {row[1] for row in conn.execute(f"PRAGMA table_info({table})").fetchall()}
+    if column not in cols:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_def}")
+
+
 def get_conn():
     """Get database connection."""
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -63,6 +69,8 @@ def init_db():
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             audio_filename TEXT NOT NULL,
             audio_duration_sec REAL,
+            audio_mime TEXT,
+            audio_data BLOB,
             question TEXT NOT NULL,
             answer TEXT NOT NULL,
             created_at TEXT DEFAULT CURRENT_TIMESTAMP
@@ -83,6 +91,8 @@ def init_db():
         CREATE TABLE IF NOT EXISTS analyze_logs (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             audio_filename TEXT NOT NULL,
+            audio_mime TEXT,
+            audio_data BLOB,
             question TEXT NOT NULL,
             transcript TEXT,
             sounds_json TEXT,
@@ -112,6 +122,10 @@ def init_db():
         CREATE INDEX IF NOT EXISTS idx_sessions_token ON sessions(token);
         CREATE INDEX IF NOT EXISTS idx_sessions_user ON sessions(user_id);
     """)
+    _ensure_column(conn, "inferences", "audio_mime", "TEXT")
+    _ensure_column(conn, "inferences", "audio_data", "BLOB")
+    _ensure_column(conn, "analyze_logs", "audio_mime", "TEXT")
+    _ensure_column(conn, "analyze_logs", "audio_data", "BLOB")
     conn.commit()
     conn.close()
 
@@ -121,15 +135,18 @@ def save_inference(
     question: str,
     answer: str,
     audio_duration_sec: Optional[float] = None,
+    audio_data: Optional[bytes] = None,
+    audio_mime: Optional[str] = None,
 ) -> int:
     """Save inference record, return row id. Retries on busy."""
     for attempt in range(3):
         try:
             conn = get_conn()
             cur = conn.execute(
-                """INSERT INTO inferences (audio_filename, audio_duration_sec, question, answer)
-                   VALUES (?, ?, ?, ?)""",
-                (audio_filename, audio_duration_sec, question, answer),
+                """INSERT INTO inferences
+                   (audio_filename, audio_duration_sec, audio_mime, audio_data, question, answer)
+                   VALUES (?, ?, ?, ?, ?, ?)""",
+                (audio_filename, audio_duration_sec, audio_mime, audio_data, question, answer),
             )
             row_id = cur.lastrowid
             conn.commit()
@@ -173,6 +190,8 @@ def save_analyze_log(
     sounds: list[str],
     emotion: str,
     answer: str,
+    audio_data: Optional[bytes] = None,
+    audio_mime: Optional[str] = None,
 ) -> int:
     """Persist full ALM-Lite /analyze result. Returns row id."""
     sounds_json = json.dumps(sounds, ensure_ascii=False)
@@ -181,9 +200,18 @@ def save_analyze_log(
             conn = get_conn()
             cur = conn.execute(
                 """INSERT INTO analyze_logs
-                   (audio_filename, question, transcript, sounds_json, emotion, answer)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                (audio_filename, question, transcript or "", sounds_json, emotion or "", answer),
+                   (audio_filename, audio_mime, audio_data, question, transcript, sounds_json, emotion, answer)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (
+                    audio_filename,
+                    audio_mime,
+                    audio_data,
+                    question,
+                    transcript or "",
+                    sounds_json,
+                    emotion or "",
+                    answer,
+                ),
             )
             row_id = cur.lastrowid
             conn.commit()
@@ -218,7 +246,11 @@ def get_analyze_logs(limit: int = 50, offset: int = 0) -> list[dict[str, Any]]:
 
 def get_analyze_by_id(log_id: int) -> Optional[dict[str, Any]]:
     conn = get_conn()
-    row = conn.execute("SELECT * FROM analyze_logs WHERE id = ?", (log_id,)).fetchone()
+    row = conn.execute(
+        """SELECT id, audio_filename, question, transcript, sounds_json, emotion, answer, created_at
+           FROM analyze_logs WHERE id = ?""",
+        (log_id,),
+    ).fetchone()
     conn.close()
     if not row:
         return None
@@ -228,6 +260,20 @@ def get_analyze_by_id(log_id: int) -> Optional[dict[str, Any]]:
     except json.JSONDecodeError:
         d["sounds"] = []
     return d
+
+
+def get_analyze_audio(log_id: int) -> Optional[tuple[bytes, str, str]]:
+    """Return (audio_bytes, mime_type, filename) for a stored analyze log."""
+    conn = get_conn()
+    row = conn.execute(
+        "SELECT audio_data, audio_mime, audio_filename FROM analyze_logs WHERE id = ?",
+        (log_id,),
+    ).fetchone()
+    conn.close()
+    if not row or not row["audio_data"]:
+        return None
+    mime = row["audio_mime"] or "application/octet-stream"
+    return bytes(row["audio_data"]), mime, row["audio_filename"] or "audio"
 
 
 def create_user(email: str, password: str) -> int:

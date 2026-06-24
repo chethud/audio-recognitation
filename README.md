@@ -30,14 +30,15 @@ The table below uses values from your latest generated metrics files:
 
 > Note: ASR and LLM in this project are pretrained inference modules. Their quality is typically reported with task-specific metrics (e.g., WER for ASR and human/benchmark scoring for LLM answers), not a single unified "accuracy" value.
 
-### Database: SQLite + optional Supabase
+### Database: SQLite
 
-- **SQLite** (default): `data/alm.db` — all runs are stored locally.
-- **Supabase** (optional mirror for `POST /analyze`): copy `.env.example` to `.env`, set your project URL and API key, then `ALM_USE_SUPABASE=1`.
+All data is stored locally in `data/alm.db`:
 
-Example URL (your project): `https://ljxarxkxlgzkueedlrbi.supabase.co` — add keys from **Supabase Dashboard → Project Settings → API** (use **service_role** on the server for storage upload + `audio_logs` inserts, or configure **RLS** if you use the **anon** key).
+- **analyze_logs** — transcript, sounds, emotion, answer, and uploaded audio (BLOB)
+- **inferences** — legacy `/inference` runs with optional audio storage
+- **users** / **sessions** — authentication
 
-In Supabase: create Storage bucket **`audio-files`**, run SQL from `supabase/schema.sql` for the **`audio_logs`** table.
+Retrieve stored audio: `GET /analyze/history/{log_id}/audio`
 
 ---
 

@@ -37,7 +37,7 @@ class AnalyzeResponse(BaseModel):
     answer: str = ""
     question: str = ""
     audio_filename: str = ""
-    log_id: Optional[str] = None  # SQLite analyze_logs.id (primary); optional Supabase UUID if mirrored
+    log_id: Optional[str] = None  # SQLite analyze_logs.id
 
 
 class AnalyzeLogItem(BaseModel):
