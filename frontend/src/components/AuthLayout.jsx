@@ -6,7 +6,10 @@ export default function AuthLayout({ title, subtitle, children }) {
     <GlassBackground className="flex flex-col items-center justify-center px-4 py-12">
       <div className="w-full max-w-md">
         <p className="font-display text-center text-sm uppercase tracking-[0.2em] text-cyan-300/80 mb-3">
-          <Link to="/" className="hover:text-cyan-200 transition-colors">
+          <Link to="/" className="hover:text-cyan-200 transition-colors inline-flex items-center gap-2">
+            <span className="inline-flex h-7 w-7 items-center justify-center rounded-lg border border-cyan-400/20 bg-cyan-500/10 text-xs font-bold">
+              ALM
+            </span>
             ALM-Lite
           </Link>
         </p>

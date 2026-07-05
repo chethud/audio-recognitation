@@ -11,6 +11,7 @@ export default function UploadAudio({
   disabled,
 }) {
   const [previewUrl, setPreviewUrl] = useState(null);
+  const [dragOver, setDragOver] = useState(false);
 
   useEffect(() => {
     if (!file) {
@@ -22,27 +23,68 @@ export default function UploadAudio({
     return () => URL.revokeObjectURL(url);
   }, [file]);
 
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    const dropped = e.dataTransfer.files?.[0];
+    if (dropped) onFileChange(dropped);
+  }
+
   return (
-    <div className="space-y-6">
+    <div className="space-y-5">
       <div>
         <label className="block text-sm font-medium text-slate-300/90 mb-2">
           Audio file
         </label>
-        <div className="glass-panel-subtle p-1">
+        <div
+          className={`upload-dropzone ${dragOver ? "upload-dropzone-active" : ""}`}
+          onDragOver={(e) => {
+            e.preventDefault();
+            setDragOver(true);
+          }}
+          onDragLeave={() => setDragOver(false)}
+          onDrop={handleDrop}
+        >
           <input
             type="file"
             accept="audio/*,.mp4,.webm,.mkv,.avi,.mov"
             onChange={(e) => onFileChange(e.target.files?.[0] || null)}
-            className="block w-full text-sm text-slate-300 file:mr-4 file:py-2.5 file:px-4 file:rounded-lg file:border file:border-white/10 file:bg-white/10 file:text-cyan-100 file:backdrop-blur-sm hover:file:bg-white/15 cursor-pointer"
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            aria-label="Choose audio file"
           />
+          <div className="pointer-events-none text-center py-6 px-4">
+            <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/5">
+              <svg
+                className="h-5 w-5 text-cyan-400/80"
+                fill="none"
+                viewBox="0 0 24 24"
+                stroke="currentColor"
+                strokeWidth={1.75}
+                aria-hidden
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"
+                />
+              </svg>
+            </div>
+            <p className="text-sm text-slate-300">
+              {file ? "Replace file" : "Drop audio here or click to browse"}
+            </p>
+            <p className="text-xs text-slate-500 mt-1">
+              First ~12 seconds are analyzed for speed
+            </p>
+          </div>
         </div>
+
         {file && previewUrl && (
-          <div className="mt-4 glass-panel-subtle p-4">
+          <div className="mt-3 glass-panel-subtle p-4">
             <p
               className="text-sm text-slate-400 mb-3 truncate flex items-center gap-2"
               title={file.name}
             >
-              <span className="inline-block h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)]" />
+              <span className="inline-block h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)] shrink-0" />
               {file.name}
             </p>
             <audio
@@ -56,18 +98,20 @@ export default function UploadAudio({
           </div>
         )}
       </div>
+
       <div>
         <label className="block text-sm font-medium text-slate-300/90 mb-2">
-          Question
+          Your question
         </label>
         <textarea
           value={question}
           onChange={(e) => onQuestionChange(e.target.value)}
-          rows={3}
-          className="glass-input resize-none"
-          placeholder="e.g. Where is this scene likely taking place?"
+          rows={2}
+          className="glass-input resize-none text-sm"
+          placeholder="e.g. What is happening in this scene?"
         />
       </div>
+
       <button
         type="button"
         onClick={onSubmit}
@@ -87,7 +131,7 @@ export default function UploadAudio({
             ) : null}
           </span>
         ) : (
-          "Analyze"
+          "Run analysis"
         )}
       </button>
     </div>

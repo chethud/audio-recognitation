@@ -1,12 +1,39 @@
-export default function ResultDisplay({ result, error }) {
+export default function ResultDisplay({ result, error, loading }) {
   if (error) {
     return <div className="glass-error">{error}</div>;
   }
+
+  if (loading) {
+    return (
+      <div className="glass-panel-subtle px-4 py-10 text-center">
+        <span className="inline-block h-8 w-8 rounded-full border-2 border-cyan-400/30 border-t-cyan-300 animate-spin mb-3" />
+        <p className="text-slate-400 text-sm">Running full analysis…</p>
+      </div>
+    );
+  }
+
   if (!result) {
     return (
-      <div className="glass-panel-subtle px-4 py-8 text-center">
+      <div className="glass-panel-subtle px-4 py-10 text-center">
+        <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-xl border border-white/10 bg-white/[0.03]">
+          <svg
+            className="h-6 w-6 text-slate-600"
+            fill="none"
+            viewBox="0 0 24 24"
+            stroke="currentColor"
+            strokeWidth={1.5}
+            aria-hidden
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="M19.5 14.25v-2.625a3.375 3.375 0 00-3.375-3.375h-1.5A1.125 1.125 0 0113.5 7.125v-1.5a3.375 3.375 0 00-3.375-3.375H8.25m0 12.75h7.5m-7.5 3H12M10.5 2.25H5.625c-.621 0-1.125.504-1.125 1.125v17.25c0 .621.504 1.125 1.125 1.125h12.75c.621 0 1.125-.504 1.125-1.125V11.25a9 9 0 00-9-9z"
+            />
+          </svg>
+        </div>
         <p className="text-slate-500 text-sm">
-          Results will appear here after you run an analysis.
+          Upload audio and click <span className="text-slate-400">Analyze</span>{" "}
+          to see transcript, sounds, emotion, and AI answer here.
         </p>
       </div>
     );
@@ -14,23 +41,25 @@ export default function ResultDisplay({ result, error }) {
 
   const { transcript, sounds, emotion, answer } = result;
 
-  return (
-    <div className="space-y-4 text-left">
-      <section className="glass-panel-subtle p-4">
-        <h3 className="font-display text-xs uppercase tracking-widest text-cyan-300/70 mb-2">
-          Transcript
-        </h3>
-        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed">
+  const sections = [
+    {
+      key: "transcript",
+      label: "Transcript",
+      accent: "cyan",
+      content: (
+        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
           {transcript || "—"}
         </p>
-      </section>
-      <section className="glass-panel-subtle p-4">
-        <h3 className="font-display text-xs uppercase tracking-widest text-cyan-300/70 mb-2">
-          Sounds
-        </h3>
+      ),
+    },
+    {
+      key: "sounds",
+      label: "Detected sounds",
+      accent: "cyan",
+      content: (
         <div className="flex flex-wrap gap-2">
           {(sounds || []).length === 0 ? (
-            <span className="text-slate-500">—</span>
+            <span className="text-slate-500 text-sm">No sounds detected</span>
           ) : (
             sounds.map((s) => (
               <span key={s} className="glass-tag">
@@ -39,21 +68,50 @@ export default function ResultDisplay({ result, error }) {
             ))
           )}
         </div>
-      </section>
-      <section className="glass-panel-subtle p-4">
-        <h3 className="font-display text-xs uppercase tracking-widest text-cyan-300/70 mb-2">
-          Emotion
-        </h3>
-        <p className="text-slate-100 capitalize">{emotion || "—"}</p>
-      </section>
-      <section className="glass-panel-subtle p-4 border-teal-400/20">
-        <h3 className="font-display text-xs uppercase tracking-widest text-teal-300/70 mb-2">
-          Answer
-        </h3>
-        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed border-l-2 border-teal-400/40 pl-4">
+      ),
+    },
+    {
+      key: "emotion",
+      label: "Speaker emotion",
+      accent: "cyan",
+      content: (
+        <p className="text-slate-100 capitalize text-sm sm:text-base">
+          {emotion || "—"}
+        </p>
+      ),
+    },
+    {
+      key: "answer",
+      label: "AI answer",
+      accent: "teal",
+      highlight: true,
+      content: (
+        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-teal-400/40 pl-4">
           {answer || "—"}
         </p>
-      </section>
+      ),
+    },
+  ];
+
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 text-left">
+      {sections.map((s) => (
+        <section
+          key={s.key}
+          className={`glass-panel-subtle p-4 ${
+            s.highlight ? "sm:col-span-2 border-teal-400/15" : ""
+          }`}
+        >
+          <h3
+            className={`section-label mb-2 ${
+              s.accent === "teal" ? "text-teal-300/70" : ""
+            }`}
+          >
+            {s.label}
+          </h3>
+          {s.content}
+        </section>
+      ))}
     </div>
   );
 }

@@ -1,9 +1,11 @@
 import { useState } from "react";
-import { Link } from "react-router-dom";
 import { analyzeAudio } from "../api/api.js";
 import UploadAudio from "../components/UploadAudio.jsx";
 import ResultDisplay from "../components/ResultDisplay.jsx";
 import GlassBackground from "../components/GlassBackground.jsx";
+import AppHeader from "../components/AppHeader.jsx";
+import ProjectInfo from "../components/ProjectInfo.jsx";
+import AppFooter from "../components/AppFooter.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
 
 export default function Home() {
@@ -41,7 +43,7 @@ export default function Home() {
       let msg =
         d ||
         e?.message ||
-        "Request failed. Is the API running on port 8000?";
+        "Request failed. Is the API running on port 8001?";
       if (Array.isArray(d)) {
         msg = d.map((x) => x?.msg || JSON.stringify(x)).join(" ");
       } else if (typeof d === "object" && d !== null) {
@@ -57,87 +59,62 @@ export default function Home() {
 
   return (
     <GlassBackground>
-      <div className="mx-auto max-w-3xl px-4 py-10 sm:py-14">
-        <nav className="flex flex-wrap items-center justify-end gap-3 text-sm mb-10">
-          <div className="glass-nav flex flex-wrap items-center gap-x-4 gap-y-1">
-            {user ? (
-              <>
-                <span className="text-slate-400 truncate max-w-[200px] sm:max-w-xs">
-                  {user.email}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => logout()}
-                  className="text-cyan-300 hover:text-cyan-200 transition-colors"
-                >
-                  Log out
-                </button>
-              </>
-            ) : (
-              <>
-                <Link
-                  to="/login"
-                  className="text-slate-300 hover:text-white transition-colors"
-                >
-                  Log in
-                </Link>
-                <Link
-                  to="/signup"
-                  className="text-cyan-300 hover:text-cyan-100 font-medium transition-colors"
-                >
-                  Sign up
-                </Link>
-              </>
-            )}
-          </div>
-        </nav>
+      <div className="mx-auto max-w-6xl px-4 py-8 sm:py-10">
+        <AppHeader user={user} onLogout={logout} />
 
-        <header className="mb-10 sm:mb-12 text-center">
-          <p className="font-display text-sm uppercase tracking-[0.25em] text-cyan-300/70 mb-3">
-            ALM-Lite
+        <section className="mb-8 sm:mb-10 text-center lg:text-left">
+          <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300/90 mb-4">
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            Full audio understanding pipeline
           </p>
-          <h1 className="font-display text-3xl sm:text-4xl font-bold text-gradient tracking-tight">
-            Audio language &amp; scene understanding
+          <h1 className="font-display text-3xl sm:text-4xl lg:text-[2.75rem] font-bold text-gradient tracking-tight leading-tight max-w-2xl mx-auto lg:mx-0">
+            Understand audio beyond words
           </h1>
-          <p className="mt-4 text-slate-400/90 max-w-xl mx-auto leading-relaxed">
-            Speech recognition, environmental sounds, emotion, and AI reasoning —
-            powered by{" "}
-            <code className="rounded-md border border-white/10 bg-white/5 px-1.5 py-0.5 text-cyan-200/90 text-sm backdrop-blur-sm">
-              POST /analyze
-            </code>
+          <p className="mt-3 text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed text-sm sm:text-base">
+            Upload a clip and get speech transcription, sound events, speaker
+            emotion, and an AI-generated answer — all in one analysis.
           </p>
-        </header>
+        </section>
 
-        <div className="grid gap-6 sm:gap-8">
-          <div className="glass-panel p-6 sm:p-8">
-            <h2 className="font-display text-lg font-semibold text-white/95 mb-6 flex items-center gap-2">
-              <span className="h-8 w-8 rounded-lg border border-white/10 bg-cyan-500/10 backdrop-blur-sm flex items-center justify-center text-cyan-300 text-sm">
-                1
-              </span>
-              Upload &amp; analyze
-            </h2>
-            <UploadAudio
-              file={file}
-              onFileChange={setFile}
-              question={question}
-              onQuestionChange={setQuestion}
-              onSubmit={handleSubmit}
-              loading={loading}
-              loadingStage={loadingStage}
-              disabled={loading}
-            />
+        <div className="grid gap-6 lg:grid-cols-12 lg:gap-8 items-start">
+          <div className="lg:col-span-4 order-2 lg:order-1">
+            <ProjectInfo />
           </div>
 
-          <div className="glass-panel p-6 sm:p-8 min-h-[220px]">
-            <h2 className="font-display text-lg font-semibold text-white/95 mb-6 flex items-center gap-2">
-              <span className="h-8 w-8 rounded-lg border border-white/10 bg-teal-500/10 backdrop-blur-sm flex items-center justify-center text-teal-300 text-sm">
-                2
-              </span>
-              Results
-            </h2>
-            <ResultDisplay result={result} error={error} />
+          <div className="lg:col-span-8 order-1 lg:order-2 space-y-6">
+            <div className="glass-panel p-6 sm:p-7">
+              <div className="flex items-center justify-between gap-3 mb-6">
+                <h2 className="font-display text-lg font-semibold text-white flex items-center gap-2.5">
+                  <span className="step-badge step-badge-lg">1</span>
+                  Upload &amp; analyze
+                </h2>
+                <span className="text-xs text-slate-500 hidden sm:inline">
+                  WAV · MP3 · FLAC · M4A
+                </span>
+              </div>
+              <UploadAudio
+                file={file}
+                onFileChange={setFile}
+                question={question}
+                onQuestionChange={setQuestion}
+                onSubmit={handleSubmit}
+                loading={loading}
+                loadingStage={loadingStage}
+                disabled={loading}
+              />
+            </div>
+
+            <div className="glass-panel p-6 sm:p-7 min-h-[240px]">
+              <h2 className="font-display text-lg font-semibold text-white mb-6 flex items-center gap-2.5">
+                <span className="step-badge step-badge-lg step-badge-teal">2</span>
+                Analysis results
+              </h2>
+              <ResultDisplay result={result} error={error} loading={loading} />
+            </div>
           </div>
         </div>
+
+        <AppFooter />
       </div>
     </GlassBackground>
   );
