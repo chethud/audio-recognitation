@@ -9,7 +9,7 @@ from typing import Any, Dict, Optional, Union
 import numpy as np
 import torch
 
-from src.asr import transcribe_audio
+from src.asr import transcribe_bilingual
 from src.context_builder import build_structured_context
 from src.emotion import predict_emotion_from_audio
 from src.reasoning import answer_from_context_fast, answer_question_from_context
@@ -37,6 +37,7 @@ def run_alm_lite(
     sed_enabled: bool = True,
     llm_enabled: bool = True,
     fast_mode: bool = False,
+    max_duration_sec: Optional[float] = None,
 ) -> Dict[str, Any]:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -49,25 +50,28 @@ def run_alm_lite(
     emo_id = emotion_model_id or "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
 
     if fast_mode:
-        transcript = transcribe_audio(
+        asr = transcribe_bilingual(
             audio,
             sample_rate=sample_rate,
             model_id=asr_model_id,
             device=device,
-            language=asr_language,
+            max_duration_sec=max_duration_sec,
         )
+        transcript = asr.transcript
+        transcript_original = asr.transcript_original
+        language = asr.language
         sound_events: list = []
         emotion_label = "neutral"
     else:
         # Full mode: run ASR, SED, and emotion at the same time (fastest on CPU).
         with ThreadPoolExecutor(max_workers=3) as pool:
             f_asr = pool.submit(
-                transcribe_audio,
+                transcribe_bilingual,
                 audio,
                 sample_rate=sample_rate,
                 model_id=asr_model_id,
                 device=device,
-                language=asr_language,
+                max_duration_sec=max_duration_sec,
             )
             f_sed = (
                 pool.submit(
@@ -94,7 +98,10 @@ def run_alm_lite(
                 if emotion_enabled
                 else None
             )
-            transcript = f_asr.result()
+            asr = f_asr.result()
+            transcript = asr.transcript
+            transcript_original = asr.transcript_original
+            language = asr.language
             sound_events = f_sed.result() if f_sed else []
             emotion_label = f_emo.result() if f_emo else "neutral"
 
@@ -106,7 +113,12 @@ def run_alm_lite(
     )
 
     if fast_mode or not llm_enabled:
-        answer = answer_from_context_fast(context, question)
+        answer = answer_from_context_fast(
+            context,
+            question,
+            language=language,
+            transcript_original=transcript_original,
+        )
     else:
         answer = answer_question_from_context(
             context=context,
@@ -116,10 +128,13 @@ def run_alm_lite(
             repetition_penalty=repetition_penalty,
             no_repeat_ngram_size=no_repeat_ngram_size,
             device=torch.device(device) if isinstance(device, str) else device,
+            response_language=language,
         )
 
     return {
         "transcript": transcript,
+        "transcript_original": transcript_original,
+        "language": language,
         "sound_events": sound_events,
         "emotion": emotion_label,
         "context": context,

@@ -1,3 +1,28 @@
+const LANGUAGE_LABELS = {
+  en: "English",
+  hi: "Hindi",
+  es: "Spanish",
+  fr: "French",
+  de: "German",
+  it: "Italian",
+  pt: "Portuguese",
+  ru: "Russian",
+  ja: "Japanese",
+  ko: "Korean",
+  zh: "Chinese",
+  ar: "Arabic",
+  ta: "Tamil",
+  te: "Telugu",
+  bn: "Bengali",
+  mr: "Marathi",
+  ur: "Urdu",
+};
+
+function languageLabel(code) {
+  if (!code || code === "en") return "English";
+  return LANGUAGE_LABELS[code] || code.toUpperCase();
+}
+
 export default function ResultDisplay({ result, error, loading }) {
   if (error) {
     return <div className="glass-error">{error}</div>;
@@ -6,7 +31,7 @@ export default function ResultDisplay({ result, error, loading }) {
   if (loading) {
     return (
       <div className="glass-panel-subtle px-4 py-10 text-center">
-        <span className="inline-block h-8 w-8 rounded-full border-2 border-cyan-400/30 border-t-cyan-300 animate-spin mb-3" />
+        <span className="inline-block h-8 w-8 rounded-full border-2 border-violet-400/30 border-t-violet-300 animate-spin mb-3" />
         <p className="text-slate-400 text-sm">Running full analysis…</p>
       </div>
     );
@@ -39,13 +64,14 @@ export default function ResultDisplay({ result, error, loading }) {
     );
   }
 
-  const { transcript, sounds, emotion, answer } = result;
+  const { transcript, sounds, emotion, answer, language } = result;
+  const answerLang = language && language !== "en" ? languageLabel(language) : null;
 
   const sections = [
     {
       key: "transcript",
-      label: "Transcript",
-      accent: "cyan",
+      label: "Transcript (English)",
+      accent: "violet",
       content: (
         <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
           {transcript || "—"}
@@ -55,7 +81,7 @@ export default function ResultDisplay({ result, error, loading }) {
     {
       key: "sounds",
       label: "Detected sounds",
-      accent: "cyan",
+      accent: "violet",
       content: (
         <div className="flex flex-wrap gap-2">
           {(sounds || []).length === 0 ? (
@@ -73,7 +99,7 @@ export default function ResultDisplay({ result, error, loading }) {
     {
       key: "emotion",
       label: "Speaker emotion",
-      accent: "cyan",
+      accent: "violet",
       content: (
         <p className="text-slate-100 capitalize text-sm sm:text-base">
           {emotion || "—"}
@@ -82,11 +108,11 @@ export default function ResultDisplay({ result, error, loading }) {
     },
     {
       key: "answer",
-      label: "AI answer",
-      accent: "teal",
+      label: answerLang ? `AI answer (${answerLang})` : "AI answer",
+      accent: "fuchsia",
       highlight: true,
       content: (
-        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-teal-400/40 pl-4">
+        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-fuchsia-400/45 pl-4">
           {answer || "—"}
         </p>
       ),
@@ -99,12 +125,12 @@ export default function ResultDisplay({ result, error, loading }) {
         <section
           key={s.key}
           className={`glass-panel-subtle p-4 ${
-            s.highlight ? "sm:col-span-2 border-teal-400/15" : ""
+            s.highlight ? "sm:col-span-2 border-fuchsia-400/20" : ""
           }`}
         >
           <h3
             className={`section-label mb-2 ${
-              s.accent === "teal" ? "text-teal-300/70" : ""
+              s.accent === "fuchsia" ? "text-fuchsia-300/75" : ""
             }`}
           >
             {s.label}

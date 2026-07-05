@@ -414,6 +414,8 @@ async def analyze(
         raise HTTPException(500, "Empty answer from model")
 
     transcript = result.get("transcript", "") or ""
+    transcript_original = result.get("transcript_original", "") or ""
+    language = result.get("language", "en") or "en"
     sounds = _sound_events_to_labels(result.get("sound_events") or [])
     emotion = result.get("emotion", "") or "neutral"
 
@@ -433,6 +435,8 @@ async def analyze(
 
     return AnalyzeResponse(
         transcript=transcript,
+        transcript_original=transcript_original,
+        language=language,
         sounds=sounds,
         emotion=emotion,
         answer=answer,

@@ -24,17 +24,13 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
-    const stages = [
-      "Transcribing speech…",
-      "Detecting sounds & emotion…",
-      "Generating AI answer…",
-    ];
+    const stages = ["Transcribing speech…", "Building answer…"];
     let i = 0;
     setLoadingStage(stages[0]);
     const timer = setInterval(() => {
       i = (i + 1) % stages.length;
       setLoadingStage(stages[i]);
-    }, 8000);
+    }, 4000);
     try {
       const data = await analyzeAudio(file, question);
       setResult(data);
@@ -63,8 +59,8 @@ export default function Home() {
         <AppHeader user={user} onLogout={logout} />
 
         <section className="mb-8 sm:mb-10 text-center lg:text-left">
-          <p className="inline-flex items-center gap-2 rounded-full border border-cyan-400/20 bg-cyan-500/10 px-3 py-1 text-xs font-medium text-cyan-300/90 mb-4">
-            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+          <p className="inline-flex items-center gap-2 rounded-full border border-violet-400/25 bg-violet-500/15 px-3 py-1 text-xs font-medium text-violet-200/90 mb-4">
+            <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400 animate-pulse" />
             Full audio understanding pipeline
           </p>
           <h1 className="font-display text-3xl sm:text-4xl lg:text-[2.75rem] font-bold text-gradient tracking-tight leading-tight max-w-2xl mx-auto lg:mx-0">
@@ -106,7 +102,7 @@ export default function Home() {
 
             <div className="glass-panel p-6 sm:p-7 min-h-[240px]">
               <h2 className="font-display text-lg font-semibold text-white mb-6 flex items-center gap-2.5">
-                <span className="step-badge step-badge-lg step-badge-teal">2</span>
+                <span className="step-badge step-badge-lg step-badge-accent">2</span>
                 Analysis results
               </h2>
               <ResultDisplay result={result} error={error} loading={loading} />

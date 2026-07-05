@@ -10,24 +10,24 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 12   # first 12s only (fast decode); increase for longer analysis
+  max_audio_length_sec: 8    # only first 8s analyzed — keeps long uploads fast
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
 # --- ALM-Lite: full AI pipeline (ASR + SED + emotion + LLM), speed-optimized ---
 alm_lite:
-  fast_mode: false   # false = full analysis with LLM reasoning
+  fast_mode: true   # ASR-only locally — full stack needs more RAM/page file
   store_uploaded_audio: false
   asr:
     model_id: "openai/whisper-tiny"
-    language: null   # set "en" for faster English-only
+    language: null   # auto-detect; transcript shown in English, answer in detected language
   sed:
     enabled: true
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
     top_k: 3
     threshold: 0.35
   emotion:
-    enabled: true
+    enabled: false   # disabled locally — large model can crash on low RAM
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
     enabled: true

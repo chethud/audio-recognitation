@@ -4,9 +4,9 @@ export default function AppHeader({ user, onLogout }) {
   return (
     <header className="flex flex-wrap items-center justify-between gap-4 mb-8 sm:mb-10">
       <Link to="/" className="flex items-center gap-3 group">
-        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 backdrop-blur-sm shadow-[0_0_20px_rgba(34,211,238,0.15)]">
+        <div className="flex h-10 w-10 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/15 backdrop-blur-sm shadow-[0_0_20px_rgba(139,92,246,0.2)]">
           <svg
-            className="h-5 w-5 text-cyan-300"
+            className="h-5 w-5 text-violet-300"
             fill="none"
             viewBox="0 0 24 24"
             stroke="currentColor"
@@ -21,8 +21,8 @@ export default function AppHeader({ user, onLogout }) {
           </svg>
         </div>
         <div>
-          <p className="font-display text-lg font-bold text-white tracking-tight group-hover:text-cyan-100 transition-colors">
-            ALM-Lite
+          <p className="font-display text-lg font-bold text-white tracking-tight group-hover:text-violet-100 transition-colors">
+            ALM-LITE
           </p>
           <p className="text-xs text-slate-500 hidden sm:block">
             Audio language model
@@ -39,7 +39,7 @@ export default function AppHeader({ user, onLogout }) {
             <button
               type="button"
               onClick={onLogout}
-              className="text-cyan-300 hover:text-cyan-200 transition-colors font-medium"
+              className="text-violet-300 hover:text-violet-200 transition-colors font-medium"
             >
               Log out
             </button>
@@ -54,7 +54,7 @@ export default function AppHeader({ user, onLogout }) {
             </Link>
             <Link
               to="/signup"
-              className="text-cyan-300 hover:text-cyan-100 font-medium transition-colors"
+              className="text-fuchsia-300 hover:text-fuchsia-100 font-medium transition-colors"
             >
               Sign up
             </Link>

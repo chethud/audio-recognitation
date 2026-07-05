@@ -32,6 +32,8 @@ class InferenceResponseModular(BaseModel):
 class AnalyzeResponse(BaseModel):
     """Production-style ALM-Lite output (matches POST /analyze contract)."""
     transcript: str = ""
+    transcript_original: str = ""
+    language: str = "en"
     sounds: List[str] = []
     emotion: str = ""
     answer: str = ""

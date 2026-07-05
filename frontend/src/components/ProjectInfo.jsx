@@ -41,7 +41,7 @@ export default function ProjectInfo() {
           About this project
         </h2>
         <p className="text-sm text-slate-400 leading-relaxed">
-          <span className="text-slate-300">ALM-Lite</span> is an audio language
+          <span className="text-slate-300">ALM-LITE</span> is an audio language
           model that understands audio holistically — not just what was said, but
           what sounds are present, how the speaker feels, and what it all means
           together.
@@ -63,7 +63,7 @@ export default function ProjectInfo() {
               </span>
               <div className="min-w-0">
                 <p className="text-sm font-medium text-slate-200">{f.title}</p>
-                <p className="text-xs text-cyan-400/80 mb-0.5">{f.model}</p>
+                <p className="text-xs text-violet-400/85 mb-0.5">{f.model}</p>
                 <p className="text-xs text-slate-500 leading-relaxed">
                   {f.desc}
                 </p>

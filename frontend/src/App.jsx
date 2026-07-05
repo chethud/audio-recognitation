@@ -11,7 +11,7 @@ function AppRoutes() {
     return (
       <GlassBackground className="flex items-center justify-center">
         <div className="glass-panel px-8 py-6 flex items-center gap-3 text-slate-300 text-sm">
-          <span className="h-5 w-5 rounded-full border-2 border-cyan-400/30 border-t-cyan-300 animate-spin" />
+          <span className="h-5 w-5 rounded-full border-2 border-violet-400/30 border-t-violet-300 animate-spin" />
           Loading…
         </div>
       </GlassBackground>

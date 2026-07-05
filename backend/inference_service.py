@@ -21,7 +21,6 @@ CONFIG_PATH = BASE / "config.yaml"
 
 _lock = __import__("threading").Lock()
 _warmed = False
-_cfg: Optional[dict[str, Any]] = None
 
 
 def _alm_cfg(cfg: dict[str, Any]) -> dict[str, Any]:
@@ -33,11 +32,8 @@ def _is_fast(cfg: dict[str, Any]) -> bool:
 
 
 def _load_config() -> dict[str, Any]:
-    global _cfg
-    if _cfg is None:
-        with open(CONFIG_PATH, encoding="utf-8") as f:
-            _cfg = yaml.safe_load(f)
-    return _cfg
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return yaml.safe_load(f)
 
 
 def warmup() -> None:
@@ -145,11 +141,14 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 sed_enabled=sed_cfg.get("enabled", True),
                 llm_enabled=llm_cfg.get("enabled", True),
                 fast_mode=fast,
+                max_duration_sec=max_sec if max_sec and max_sec > 0 else None,
             )
             return {
                 "ok": True,
                 "answer": result["answer"],
                 "transcript": result["transcript"],
+                "transcript_original": result.get("transcript_original", ""),
+                "language": result.get("language", "en"),
                 "sound_events": result["sound_events"],
                 "emotion": result.get("emotion", "neutral"),
                 "context": result["context"],

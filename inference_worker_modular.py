@@ -76,6 +76,7 @@ def main():
         if audio.dim() == 2:
             audio = audio.squeeze(0)
 
+        max_sec = data_cfg.get("max_audio_length_sec", 12)
         result = run_alm_lite(
             audio.numpy(),
             question,
@@ -94,12 +95,15 @@ def main():
             sed_enabled=sed_cfg.get("enabled", True),
             llm_enabled=llm_cfg.get("enabled", True),
             fast_mode=fast,
+            max_duration_sec=max_sec if max_sec and max_sec > 0 else None,
         )
 
         write_out({
             "ok": True,
             "answer": result["answer"],
             "transcript": result["transcript"],
+            "transcript_original": result.get("transcript_original", ""),
+            "language": result.get("language", "en"),
             "sound_events": result["sound_events"],
             "emotion": result.get("emotion", "neutral"),
             "context": result["context"],

@@ -8,7 +8,7 @@ export default function SiteHeader() {
     <header className="sticky top-0 z-20 border-b border-white/[0.06] bg-[#030712]/60 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-4 sm:px-6">
         <Link to="/" className="group flex items-center gap-3 min-w-0">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-cyan-400/20 bg-cyan-500/10 text-cyan-300 shadow-[0_0_20px_rgba(34,211,238,0.15)] transition group-hover:border-cyan-400/40">
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-violet-400/25 bg-violet-500/15 text-violet-300 shadow-[0_0_20px_rgba(139,92,246,0.2)] transition group-hover:border-violet-400/40">
             <svg
               className="h-5 w-5"
               fill="none"
@@ -26,7 +26,7 @@ export default function SiteHeader() {
           </span>
           <div className="min-w-0">
             <p className="font-display text-base font-bold tracking-tight text-white">
-              ALM-Lite
+              ALM-LITE
             </p>
             <p className="truncate text-xs text-slate-500">
               Audio language model
@@ -56,7 +56,7 @@ export default function SiteHeader() {
                 <button
                   type="button"
                   onClick={() => logout()}
-                  className="text-cyan-300 transition hover:text-cyan-200"
+                  className="text-violet-300 transition hover:text-violet-200"
                 >
                   Log out
                 </button>
@@ -71,7 +71,7 @@ export default function SiteHeader() {
                 </Link>
                 <Link
                   to="/signup"
-                  className="font-medium text-cyan-300 transition hover:text-cyan-100"
+                  className="font-medium text-fuchsia-300 transition hover:text-fuchsia-100"
                 >
                   Sign up
                 </Link>

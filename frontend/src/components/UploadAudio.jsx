@@ -55,7 +55,7 @@ export default function UploadAudio({
           <div className="pointer-events-none text-center py-6 px-4">
             <div className="mx-auto mb-2 flex h-10 w-10 items-center justify-center rounded-lg border border-white/10 bg-white/5">
               <svg
-                className="h-5 w-5 text-cyan-400/80"
+                className="h-5 w-5 text-violet-400/85"
                 fill="none"
                 viewBox="0 0 24 24"
                 stroke="currentColor"
@@ -73,7 +73,7 @@ export default function UploadAudio({
               {file ? "Replace file" : "Drop audio here or click to browse"}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              First ~12 seconds are analyzed for speed
+              First ~8 seconds are analyzed for speed
             </p>
           </div>
         </div>
@@ -84,13 +84,13 @@ export default function UploadAudio({
               className="text-sm text-slate-400 mb-3 truncate flex items-center gap-2"
               title={file.name}
             >
-              <span className="inline-block h-2 w-2 rounded-full bg-cyan-400 shadow-[0_0_8px_rgba(34,211,238,0.8)] shrink-0" />
+              <span className="inline-block h-2 w-2 rounded-full bg-fuchsia-400 shadow-[0_0_8px_rgba(232,121,249,0.8)] shrink-0" />
               {file.name}
             </p>
             <audio
               controls
               src={previewUrl}
-              className="w-full h-10 accent-cyan-400 opacity-90"
+              className="w-full h-10 accent-violet-500 opacity-90"
               preload="metadata"
             >
               Your browser does not support audio playback.
@@ -125,7 +125,7 @@ export default function UploadAudio({
               Analyzing…
             </span>
             {loadingStage ? (
-              <span className="text-xs font-normal text-cyan-100/80">
+              <span className="text-xs font-normal text-violet-100/85">
                 {loadingStage}
               </span>
             ) : null}

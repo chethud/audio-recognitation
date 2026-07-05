@@ -43,7 +43,7 @@ export default function Signup() {
   }
 
   return (
-    <AuthLayout title="Create account" subtitle="Join ALM-Lite">
+    <AuthLayout title="Create account" subtitle="Join ALM-LITE">
       <form onSubmit={onSubmit} className="space-y-4">
         {error ? <p className="glass-error" role="alert">{error}</p> : null}
         <div>
@@ -110,7 +110,7 @@ export default function Signup() {
       </form>
       <p className="mt-6 text-center text-slate-400 text-sm">
         Already have an account?{" "}
-        <Link to="/login" className="text-cyan-400 hover:underline">
+        <Link to="/login" className="text-violet-400 hover:text-fuchsia-300 hover:underline transition-colors">
           Log in
         </Link>
       </p>
