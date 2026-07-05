@@ -10,7 +10,7 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 8    # only first 8s analyzed — keeps long uploads fast
+  max_audio_length_sec: 30   # seconds analyzed per upload (set 0 for full file)
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
@@ -19,17 +19,21 @@ alm_lite:
   fast_mode: true   # ASR-only locally — full stack needs more RAM/page file
   store_uploaded_audio: false
   asr:
-    model_id: "openai/whisper-base"   # better multilingual/Kannada than whisper-tiny
-    language: null   # auto-detect per segment
-    segment_sec: 2.5   # scan clip in chunks for multiple languages
+    model_id: "openai/whisper-tiny"   # fastest; use whisper-base for better quality
+    language: null   # auto-detect
+    segment_sec: 5
+    max_segments: 8   # time windows for full transcript coverage
   sed:
     enabled: true
+    backend: cnn   # use local CNN (outputs/*.pt); HF AST fails on Python 3.14
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 8
-    threshold: 0.12
-    segment_sec: 2.0   # scan clip in windows for multiple sound effects
+    top_k: 5
+    threshold: 0.08   # lower for quick-trained CNN; top hits still returned
+    segment_sec: 3
+    max_windows: 5    # scan more of 30s clips
   emotion:
-    enabled: false   # disabled locally — large model can crash on low RAM
+    enabled: true
+    backend: cnn   # lightweight local CNN when checkpoints exist
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
     enabled: true
@@ -48,6 +52,7 @@ training:
   use_cpu: true
 
 alm_cnn:
+  use_in_inference: auto   # auto | true | false — load outputs/alm_cnn_merged.pt when present
   sed_checkpoint: outputs/sed_cnn.pt
   emotion_checkpoint: outputs/emotion_cnn.pt
   merged_checkpoint: outputs/alm_cnn_merged.pt

@@ -7,6 +7,8 @@ from typing import Optional
 
 import torch
 
+from src.asr.text_cleanup import is_meaningful_speech
+from src.asr.whisper_languages import language_label
 from src.env_setup import configure_ml_env
 
 configure_ml_env()
@@ -56,7 +58,16 @@ def _get_llm(model_id: str, device: torch.device):
         return tokenizer, model
 
 
-from src.asr.whisper_languages import language_label
+def _format_sound_summary(labels: list[str]) -> str:
+    if not labels:
+        return "No distinct environmental sounds detected."
+    # Drop generic "Speech" — shown separately in transcript line.
+    filtered = [l for l in labels if l.lower() not in {"speech", "conversation"}]
+    if not filtered:
+        return "General speech-like audio."
+    return ", ".join(filtered)
+
+
 def answer_from_context_fast(
     context: str,
     question: str,
@@ -64,25 +75,45 @@ def answer_from_context_fast(
     language: str = "en",
     transcript_original: str = "",
     languages: list[str] | None = None,
+    transcript: str = "",
+    emotion: str = "neutral",
+    sound_labels: list[str] | None = None,
 ) -> str:
-    """Instant answer without loading the LLM (fast_mode)."""
-    ctx = (context or "").strip()
-    q = (question or "What can be inferred from the audio?").strip()
+    """Build a readable answer without loading the LLM (fast_mode)."""
     lang = (language or "en").lower()
     langs = languages or []
+    sounds = sound_labels or []
+    speech = (transcript or "").strip()
+    emo = (emotion or "neutral").strip().capitalize()
 
-    if "[No speech detected]" in ctx and "[No environmental sounds detected]" in ctx:
-        if lang == "en" and len(langs) <= 1:
-            return "No clear speech or identifiable sounds were detected in this clip."
-        if transcript_original.strip():
-            return transcript_original.strip()
+    has_speech = is_meaningful_speech(speech)
+    has_sounds = bool(sounds)
+
+    if not has_speech and not has_sounds:
         return "No clear speech or identifiable sounds were detected in this clip."
 
-    if (lang != "en" or lang == "multi" or len(langs) > 1) and transcript_original.strip():
-        return transcript_original.strip()
+    lines: list[str] = []
 
-    compact = " ".join(line.strip() for line in ctx.splitlines() if line.strip())
-    return f'Answer to "{q}": {compact}'
+    if has_sounds:
+        lines.append(f"Sounds detected: {_format_sound_summary(sounds)}.")
+
+    if has_speech:
+        display = speech
+        if (lang != "en" or lang == "multi" or len(langs) > 1) and transcript_original.strip():
+            display = transcript_original.strip()
+        lines.append(f'Speech heard: "{display}"')
+    elif "[vocalization]" in speech or speech:
+        lines.append("Non-speech vocalizations are present (e.g. barking or background noise).")
+
+    if emo and emo.lower() not in {"unknown", "neutral"}:
+        lines.append(f"Speaker emotion: {emo}.")
+    elif has_speech:
+        lines.append(f"Speaker emotion: {emo}.")
+
+    if not lines:
+        return "No clear speech or identifiable sounds were detected in this clip."
+
+    return "\n".join(lines)
 
 
 def answer_question_from_context(
@@ -101,7 +132,6 @@ def answer_question_from_context(
 
     tokenizer, model = _get_llm(model_id, device)
 
-    # Keep prompt short for faster generation on CPU.
     if len(context) > 800:
         context = context[:800] + "…"
 

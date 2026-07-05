@@ -4,7 +4,7 @@ const base =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) || "";
 
 /** Must match backend `data.max_audio_length_sec` in config.yaml */
-const MAX_ANALYZE_SEC = 8;
+const MAX_ANALYZE_SEC = 30;
 /** Skip browser decode for very large files (server trims instead). */
 const MAX_CLIENT_TRIM_BYTES = 12 * 1024 * 1024;
 

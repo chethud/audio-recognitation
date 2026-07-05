@@ -34,6 +34,17 @@ def _get_emotion_pipeline(model_id: str, device: torch.device):
         return p
 
 
+def _use_cnn_backend(backend: str) -> bool:
+    from src.cnn.loader import should_use_cnn
+
+    b = backend.lower()
+    if b == "cnn":
+        return True
+    if b in ("hf", "wav2vec2", "huggingface"):
+        return False
+    return should_use_cnn()
+
+
 def predict_emotion_from_audio(
     audio: Union[np.ndarray, torch.Tensor],
     *,
@@ -42,6 +53,7 @@ def predict_emotion_from_audio(
     device: Optional[Union[str, torch.device]] = None,
     min_samples: int = 4000,
     enabled: bool = True,
+    backend: str = "auto",
 ) -> str:
     """
     Return a single emotion label string (model-dependent, e.g. angry, happy, neutral).
@@ -56,6 +68,15 @@ def predict_emotion_from_audio(
     """
     if not enabled:
         return "neutral"
+
+    if _use_cnn_backend(backend):
+        from src.cnn.inference import predict_emotion_cnn
+
+        return predict_emotion_cnn(
+            audio,
+            sample_rate=sample_rate,
+            min_samples=min_samples,
+        )
 
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")

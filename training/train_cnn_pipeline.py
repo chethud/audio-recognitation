@@ -74,34 +74,38 @@ def train_esc50_sed(
     output_metrics_json: Path | None = None,
 ) -> dict[str, Any]:
     """Train SED CNN on ESC-50; save checkpoint + detailed val metrics on best epoch."""
-    from datasets import Audio, load_dataset
     from sklearn.model_selection import train_test_split
 
     output_pt = output_pt or (BASE / "outputs" / "sed_cnn.pt")
     output_metrics_json = output_metrics_json or (BASE / "outputs" / "sed_metrics.json")
 
     set_seed(seed)
-    print("Loading ESC-50 (AudioSet-style subset) from Hugging Face...")
-    ds = load_dataset("ashraq/esc50", split="train")
-    if "audio" in ds.column_names:
-        ds = ds.cast_column("audio", Audio(decode=False))
+    from training.esc50_loader import load_esc50_for_training
 
-    label_ids, num_classes = _build_label_map(ds)
-    class_names = _esc50_class_names(ds, label_ids)
-    n = len(ds)
-    idx_all = list(range(n))
-    strat = label_ids if len(set(label_ids)) > 1 else None
-    tr_idx, va_idx = train_test_split(
-        idx_all,
-        test_size=val_ratio,
-        random_state=seed,
-        stratify=strat,
-    )
-    tr_labels = [label_ids[i] for i in tr_idx]
-    va_labels = [label_ids[i] for i in va_idx]
+    loaded, label_ids, num_classes, source = load_esc50_for_training()
+    if source == "hf":
+        ds = loaded
+        class_names = _esc50_class_names(ds, label_ids)
+        n = len(ds)
+        idx_all = list(range(n))
+        strat = label_ids if len(set(label_ids)) > 1 else None
+        tr_idx, va_idx = train_test_split(
+            idx_all,
+            test_size=val_ratio,
+            random_state=seed,
+            stratify=strat,
+        )
+        tr_labels = [label_ids[i] for i in tr_idx]
+        va_labels = [label_ids[i] for i in va_idx]
+        train_set = ESC50MelDataset(ds, tr_idx, n_mels, time_frames, tr_labels, center_crop=False)
+        val_set = ESC50MelDataset(ds, va_idx, n_mels, time_frames, va_labels, center_crop=True)
+    else:
+        from training.esc50_files import Esc50FileMelDataset
 
-    train_set = ESC50MelDataset(ds, tr_idx, n_mels, time_frames, tr_labels, center_crop=False)
-    val_set = ESC50MelDataset(ds, va_idx, n_mels, time_frames, va_labels, center_crop=True)
+        tr_rows, va_rows, class_names, num_classes = loaded
+        tr_labels = [r["target"] for r in tr_rows]
+        train_set = Esc50FileMelDataset(tr_rows, n_mels, time_frames, center_crop=False)
+        val_set = Esc50FileMelDataset(va_rows, n_mels, time_frames, center_crop=True)
 
     train_loader = DataLoader(
         train_set, batch_size=batch_size, shuffle=True, num_workers=0, pin_memory=False

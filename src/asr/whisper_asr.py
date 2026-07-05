@@ -12,6 +12,7 @@ from src.asr.whisper_languages import (
     whisper_language_code,
     whisper_language_name,
 )
+from src.asr.text_cleanup import clean_asr_text, is_likely_english_text
 from src.env_setup import configure_ml_env
 
 configure_ml_env()
@@ -108,6 +109,16 @@ def _detect_language(pipe, wav: np.ndarray, sample_rate: int) -> str:
         dtype = getattr(model, "dtype", torch.float32)
         input_features = input_features.to(dtype=dtype)
 
+        # Whisper language detection expects ~30s mel frames (3000); pad short clips.
+        target_frames = 3000
+        cur_frames = input_features.shape[-1]
+        if cur_frames < target_frames:
+            input_features = torch.nn.functional.pad(
+                input_features, (0, target_frames - cur_frames)
+            )
+        elif cur_frames > target_frames:
+            input_features = input_features[..., :target_frames]
+
         with torch.no_grad():
             lang_ids = model.detect_language(input_features)
             lang_id = int(lang_ids[0, 0].item())
@@ -140,6 +151,8 @@ def _run_whisper(
         "condition_on_prev_tokens": False,
         "num_beams": 1,
     }
+    # Do not pass no_speech_threshold / logprob_threshold here — on short clips
+    # transformers can compare None to float and crash transcription.
 
     whisper_lang = whisper_language_name(language_code)
     if whisper_lang and whisper_lang != "english":
@@ -156,42 +169,73 @@ def _run_whisper(
     return (text or "").strip()
 
 
-def _split_segments(
-    wav: np.ndarray, sample_rate: int, segment_sec: float
-) -> list[tuple[float, np.ndarray]]:
-    seg_len = max(int(segment_sec * sample_rate), sample_rate)
-    segments: list[tuple[float, np.ndarray]] = []
-    for start in range(0, len(wav), seg_len):
-        chunk = wav[start : start + seg_len]
-        if len(chunk) < sample_rate // 2:
-            continue
-        segments.append((start / sample_rate, chunk))
-    return segments or [(0.0, wav)]
 
-
-def _transcribe_segment(
+def _transcribe_chunk(
     pipe,
     chunk: np.ndarray,
     sample_rate: int,
-) -> tuple[str, str, str]:
-    """Return (english, original, iso language code) for one audio segment."""
-    language = _detect_language(pipe, chunk, sample_rate)
+    language: str,
+) -> tuple[str, str]:
+    """Transcribe one chunk; translate to English when not English."""
     original = _run_whisper(
         pipe, chunk, sample_rate, task="transcribe", language_code=language
     )
     if not original.strip():
-        return "", "", language
+        return "", ""
 
     if language == "en":
-        english = original
-    else:
-        english = _run_whisper(
-            pipe, chunk, sample_rate, task="translate", language_code=language
-        )
-        if not english.strip():
-            english = original
+        return original.strip(), original.strip()
 
-    return english.strip(), original.strip(), language
+    english = _run_whisper(
+        pipe, chunk, sample_rate, task="translate", language_code=language
+    )
+    return (english or original).strip(), original.strip()
+
+
+def _finalize_transcripts(en_parts: list[str], orig_parts: list[str]) -> tuple[str, str]:
+    transcript_en = clean_asr_text(" ".join(en_parts))
+    transcript_original = clean_asr_text(" ".join(orig_parts))
+    return transcript_en, transcript_original
+
+
+def _split_time_chunks(
+    wav: np.ndarray,
+    sample_rate: int,
+    segment_sec: float,
+    max_segments: int,
+) -> list[np.ndarray]:
+    """Split audio into overlapping windows for full-length transcription."""
+    if max_segments <= 1:
+        return [wav]
+
+    seg_samples = max(int(segment_sec * sample_rate), sample_rate)
+    if len(wav) <= seg_samples:
+        return [wav]
+
+    overlap = min(int(0.5 * sample_rate), seg_samples // 4)
+    step = max(seg_samples - overlap, sample_rate // 2)
+    chunks: list[np.ndarray] = []
+    for start in range(0, len(wav), step):
+        chunk = wav[start : start + seg_samples]
+        if len(chunk) < sample_rate // 2:
+            break
+        chunks.append(chunk)
+        if len(chunks) >= max_segments:
+            break
+    return chunks or [wav]
+
+
+def _probe_languages(
+    pipe, wav: np.ndarray, sample_rate: int, probe_sec: float = 2.0
+) -> tuple[str, str]:
+    """Compare language at start vs end (2 lightweight detect passes)."""
+    probe = min(int(probe_sec * sample_rate), max(len(wav) // 3, sample_rate))
+    if len(wav) <= probe:
+        lang = _detect_language(pipe, wav, sample_rate)
+        return lang, lang
+    lang_start = _detect_language(pipe, wav[:probe], sample_rate)
+    lang_end = _detect_language(pipe, wav[-probe:], sample_rate)
+    return lang_start, lang_end
 
 
 def transcribe_bilingual(
@@ -201,11 +245,11 @@ def transcribe_bilingual(
     model_id: str = "openai/whisper-tiny",
     device: Optional[Union[str, torch.device]] = None,
     max_duration_sec: Optional[float] = None,
-    segment_sec: float = 2.5,
+    segment_sec: float = 4.0,
+    max_segments: int = 2,
 ) -> TranscriptionResult:
     """
-    Auto-detect languages per segment (supports code-switching / multiple languages).
-    Returns combined English transcript and per-segment original text.
+    Auto-detect language; transcribe full clip in time windows when needed.
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -214,19 +258,54 @@ def transcribe_bilingual(
     pipe = _get_asr_pipe(model_id, device)
 
     try:
-        segments = _split_segments(wav, sample_rate, segment_sec)
+        lang_start, lang_end = _probe_languages(pipe, wav, sample_rate)
+
+        # Whole clip may be English even when language probe is wrong.
+        if lang_start == lang_end and lang_start != "en":
+            auto_en = _run_whisper(
+                pipe, wav, sample_rate, task="transcribe", language_code=None
+            )
+            if is_likely_english_text(auto_en):
+                lang_start = lang_end = "en"
+
+        multi = lang_start != lang_end and max_segments > 1
+
         en_parts: list[str] = []
         orig_parts: list[str] = []
         langs_ordered: list[str] = []
 
-        for _t, chunk in segments:
-            english, original, lang = _transcribe_segment(pipe, chunk, sample_rate)
+        if multi:
+            mid = len(wav) // 2
+            chunks = [(lang_start, wav[:mid]), (lang_end, wav[mid:])]
+            logger.info("Mixed languages detected: %s + %s", lang_start, lang_end)
+        else:
+            lang = lang_start
+            time_chunks = _split_time_chunks(wav, sample_rate, segment_sec, max_segments)
+            chunks = [(lang, c) for c in time_chunks]
+            if len(time_chunks) > 1:
+                logger.info(
+                    "Transcribing %d segments (%.1fs total)",
+                    len(time_chunks),
+                    len(wav) / sample_rate,
+                )
+
+        for lang, chunk in chunks:
+            english, original = _transcribe_chunk(pipe, chunk, sample_rate, lang)
             if not original:
                 continue
+
+            # English mis-detected as another language — keep speech in English.
+            if lang != "en" and is_likely_english_text(original):
+                lang = "en"
+                english = original
+
             langs_ordered.append(lang)
-            label = language_label(lang)
-            orig_parts.append(f"[{label}] {original}")
-            en_parts.append(english)
+            if lang == "en":
+                orig_parts.append(original)
+                en_parts.append(original)
+            else:
+                orig_parts.append(f"[{language_label(lang)}] {original}")
+                en_parts.append(english)
 
         if not en_parts:
             return TranscriptionResult(
@@ -240,8 +319,7 @@ def transcribe_bilingual(
 
         languages = list(dict.fromkeys(langs_ordered))
         language_names = [language_label(code) for code in languages]
-        transcript_en = " ".join(en_parts)
-        transcript_original = " ".join(orig_parts)
+        transcript_en, transcript_original = _finalize_transcripts(en_parts, orig_parts)
 
         if len(languages) == 1:
             primary = languages[0]

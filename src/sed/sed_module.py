@@ -7,15 +7,37 @@ from typing import List, Optional, Union
 import numpy as np
 import torch
 
+import logging
+
 from src.env_setup import configure_ml_env
 
 configure_ml_env()
 
+logger = logging.getLogger(__name__)
+
 _lock = threading.Lock()
 _pipe_cache: dict[str, object] = {}
+_hf_sed_unavailable = False
+
+
+def _hf_fallback_allowed(backend: str) -> bool:
+    """Use HuggingFace AST only when explicitly requested and CNN is not in use."""
+    from src.cnn.loader import cnn_checkpoints_exist
+
+    b = backend.lower()
+    if b == "cnn":
+        return False
+    if b in ("hf", "ast", "huggingface"):
+        return True
+    # auto: prefer CNN checkpoints; avoid broken HF load on Python 3.14+
+    return not cnn_checkpoints_exist()
 
 
 def _get_sed_pipe(model_id: str, device: Union[str, torch.device, int]):
+    global _hf_sed_unavailable
+    if _hf_sed_unavailable:
+        raise RuntimeError("HuggingFace SED (AST) is unavailable on this system")
+
     if isinstance(device, str):
         dev = 0 if device == "cuda" else -1
     elif isinstance(device, torch.device):
@@ -30,7 +52,13 @@ def _get_sed_pipe(model_id: str, device: Union[str, torch.device, int]):
             return _pipe_cache[key]
         from transformers import pipeline
 
-        p = pipeline("audio-classification", model=model_id, device=dev)
+        try:
+            p = pipeline("audio-classification", model=model_id, device=dev)
+        except Exception as exc:
+            _hf_sed_unavailable = True
+            raise RuntimeError(
+                f"Could not load HuggingFace SED model {model_id}: {exc}"
+            ) from exc
         _pipe_cache[key] = p
         return p
 
@@ -72,6 +100,17 @@ def _classify_chunk(
     return out
 
 
+def _use_cnn_backend(backend: str) -> bool:
+    from src.cnn.loader import should_use_cnn
+
+    b = backend.lower()
+    if b == "cnn":
+        return True
+    if b in ("hf", "ast", "huggingface"):
+        return False
+    return should_use_cnn()
+
+
 def detect_sound_events(
     audio: Union[torch.Tensor, np.ndarray],
     *,
@@ -80,13 +119,34 @@ def detect_sound_events(
     device: Optional[Union[str, torch.device]] = None,
     top_k: int = 10,
     threshold: float = 0.2,
+    backend: str = "auto",
 ) -> List[dict]:
+    if _use_cnn_backend(backend):
+        from src.cnn.inference import predict_sed_cnn
+
+        events = predict_sed_cnn(
+            audio,
+            sample_rate=sample_rate,
+            top_k=top_k,
+            threshold=threshold,
+        )
+        if events or backend == "cnn":
+            return events
+
+    if not _hf_fallback_allowed(backend):
+        return []
+
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    wav, sample_rate = _to_mono_wav(audio, sample_rate)
-    pipe = _get_sed_pipe(model_id, device)
-    merged = _classify_chunk(pipe, wav, sample_rate, top_k)
+    try:
+        wav, sample_rate = _to_mono_wav(audio, sample_rate)
+        pipe = _get_sed_pipe(model_id, device)
+        merged = _classify_chunk(pipe, wav, sample_rate, top_k)
+    except Exception as exc:
+        logger.warning("SED skipped (HF model unavailable): %s", exc)
+        return []
+
     return [
         {"label": e["label"], "score": round(e["score"], 4)}
         for e in merged
@@ -103,27 +163,54 @@ def detect_sound_events_segmented(
     top_k: int = 8,
     threshold: float = 0.12,
     segment_sec: float = 2.0,
+    max_windows: int = 2,
+    backend: str = "auto",
 ) -> List[dict]:
     """
-    Scan the clip in windows to catch multiple sound effects at different times.
-    Returns unique labels with the highest score seen in any window.
+    Fast multi-sound scan: full clip plus at most one extra window (not every 2s).
     """
+    if _use_cnn_backend(backend):
+        from src.cnn.inference import predict_sed_cnn
+
+        events = predict_sed_cnn(
+            audio,
+            sample_rate=sample_rate,
+            top_k=top_k,
+            threshold=threshold,
+            segment_sec=segment_sec,
+            max_windows=max_windows,
+        )
+        if events or backend == "cnn":
+            return events
+
+    if not _hf_fallback_allowed(backend):
+        return []
+
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    wav, sample_rate = _to_mono_wav(audio, sample_rate)
-    pipe = _get_sed_pipe(model_id, device)
+    try:
+        wav, sample_rate = _to_mono_wav(audio, sample_rate)
+        pipe = _get_sed_pipe(model_id, device)
+    except Exception as exc:
+        logger.warning("SED skipped (HF model unavailable): %s", exc)
+        return []
 
-    seg_len = max(int(segment_sec * sample_rate), sample_rate // 2)
     best: dict[str, float] = {}
 
-    for start in range(0, len(wav), seg_len):
-        chunk = wav[start : start + seg_len]
+    def _merge(chunk: np.ndarray) -> None:
         if len(chunk) < sample_rate // 4:
-            continue
+            return
         for item in _classify_chunk(pipe, chunk, sample_rate, top_k):
             label = item["label"]
             best[label] = max(best.get(label, 0.0), item["score"])
+
+    _merge(wav)
+
+    if max_windows > 1 and len(wav) > int(3 * sample_rate):
+        mid = len(wav) // 2
+        half = max(int(segment_sec * sample_rate), sample_rate)
+        _merge(wav[max(0, mid - half // 2) : min(len(wav), mid + half // 2)])
 
     ranked = sorted(best.items(), key=lambda x: x[1], reverse=True)
     return [

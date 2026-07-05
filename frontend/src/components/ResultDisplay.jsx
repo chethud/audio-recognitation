@@ -85,6 +85,8 @@ export default function ResultDisplay({ result, error, loading }) {
       ? language_names
       : languages?.map(languageLabel)) || [];
   const multiLang = langTags.length > 1;
+  const englishOnly =
+    !multiLang && (!language || language === "en") && langTags.length <= 1;
   const detectedLabel = multiLang
     ? langTags.join(", ")
     : language_name || languageLabel(language);
@@ -99,11 +101,11 @@ export default function ResultDisplay({ result, error, loading }) {
   const sections = [
     {
       key: "transcript",
-      label: "Transcript (English)",
+      label: englishOnly ? "Transcript" : "Transcript (English)",
       accent: "violet",
       content: (
         <>
-          {langTags.length > 0 ? (
+          {!englishOnly && langTags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {langTags.map((name) => (
                 <span
@@ -115,7 +117,7 @@ export default function ResultDisplay({ result, error, loading }) {
               ))}
             </div>
           ) : null}
-          <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
+          <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base break-words">
             {transcript || "—"}
           </p>
           {multiLang && transcript_original ? (
@@ -168,9 +170,14 @@ export default function ResultDisplay({ result, error, loading }) {
       accent: "fuchsia",
       highlight: true,
       content: (
-        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-fuchsia-400/45 pl-4">
-          {answer || "—"}
-        </p>
+        <div className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-fuchsia-400/45 pl-4 space-y-2">
+          {(answer || "—")
+            .split("\n")
+            .filter(Boolean)
+            .map((line) => (
+              <p key={line}>{line}</p>
+            ))}
+        </div>
       ),
     },
   ];

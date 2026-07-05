@@ -36,8 +36,32 @@ def _load_config() -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
+def _sed_uses_cnn(cfg: dict[str, Any]) -> bool:
+    from src.cnn.loader import should_use_cnn
+
+    sed_cfg = _alm_cfg(cfg).get("sed", {})
+    backend = str(sed_cfg.get("backend", "auto")).lower()
+    if backend in ("hf", "ast", "huggingface"):
+        return False
+    if backend == "cnn":
+        return should_use_cnn(cfg)
+    return should_use_cnn(cfg)
+
+
+def _emotion_uses_cnn(cfg: dict[str, Any]) -> bool:
+    from src.cnn.loader import should_use_cnn
+
+    emo_cfg = _alm_cfg(cfg).get("emotion", {})
+    backend = str(emo_cfg.get("backend", "auto")).lower()
+    if backend in ("hf", "wav2vec2", "huggingface"):
+        return False
+    if backend == "cnn":
+        return should_use_cnn(cfg)
+    return should_use_cnn(cfg)
+
+
 def warmup() -> None:
-    """Load models once at API startup (Whisper only in fast_mode)."""
+    """Load models once at API startup."""
     global _warmed
     with _lock:
         if _warmed:
@@ -60,19 +84,39 @@ def warmup() -> None:
         from src.asr.whisper_asr import _get_asr_pipe
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        mode = "fast (ASR + SED)" if fast else "full (ASR + SED + emotion + LLM)"
+        cnn_sed = _sed_uses_cnn(cfg)
+        cnn_emo = _emotion_uses_cnn(cfg) and emo_cfg.get("enabled", True)
+        cnn_ready = False
+        if cnn_sed or cnn_emo:
+            from src.cnn import warmup_cnn
+
+            cnn_ready = warmup_cnn(cfg)
+
+        if fast:
+            if cnn_ready and cnn_sed and cnn_emo:
+                mode = "fast (ASR + CNN SED + CNN emotion)"
+            elif cnn_ready and cnn_sed:
+                mode = "fast (ASR + CNN SED)"
+            else:
+                mode = "fast (ASR + SED)"
+        else:
+            mode = "full (ASR + SED + emotion + LLM)"
         logger.info("Warming up models [%s] on %s …", mode, device)
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if sed_cfg.get("enabled", True):
-            from src.sed.sed_module import _get_sed_pipe
+        if sed_cfg.get("enabled", True) and not (cnn_ready and cnn_sed):
+            try:
+                from src.sed.sed_module import _get_sed_pipe
 
-            _get_sed_pipe(
-                sed_cfg.get("model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"),
-                device,
-            )
-        if not fast and emo_cfg.get("enabled", True):
+                _get_sed_pipe(
+                    sed_cfg.get("model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"),
+                    device,
+                )
+            except Exception as exc:
+                logger.warning("HF SED warmup skipped: %s", exc)
+        emo_on = emo_cfg.get("enabled", True)
+        if emo_on and not fast and not (cnn_ready and cnn_emo):
             from src.emotion.emotion_module import _get_emotion_pipeline
 
             _get_emotion_pipeline(
@@ -82,6 +126,10 @@ def warmup() -> None:
                 ),
                 device,
             )
+        elif emo_on and fast and cnn_ready and cnn_emo:
+            from src.cnn.loader import _load_emo_bundle
+
+            _load_emo_bundle(cfg)
         if not fast and llm_cfg.get("enabled", True):
             from src.reasoning.llm_reasoning import _get_llm
 
@@ -130,10 +178,12 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 sed_model_id=sed_cfg.get(
                     "model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"
                 ),
-                sed_top_k=sed_cfg.get("top_k", 8),
-                sed_threshold=sed_cfg.get("threshold", 0.12),
-                sed_segment_sec=sed_cfg.get("segment_sec", 2.0),
-                asr_segment_sec=asr_cfg.get("segment_sec", 2.5),
+                sed_top_k=sed_cfg.get("top_k", 5),
+                sed_threshold=sed_cfg.get("threshold", 0.15),
+                sed_segment_sec=sed_cfg.get("segment_sec", 3.0),
+                sed_max_windows=sed_cfg.get("max_windows", 2),
+                asr_segment_sec=asr_cfg.get("segment_sec", 4.0),
+                asr_max_segments=asr_cfg.get("max_segments", 2),
                 llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
                 max_new_tokens=llm_cfg.get("max_new_tokens", 32),
                 repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
@@ -144,6 +194,8 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 llm_enabled=llm_cfg.get("enabled", True),
                 fast_mode=fast,
                 max_duration_sec=max_sec if max_sec and max_sec > 0 else None,
+                sed_backend=sed_cfg.get("backend", "auto"),
+                emotion_backend=emo_cfg.get("backend", "auto"),
             )
             return {
                 "ok": True,
