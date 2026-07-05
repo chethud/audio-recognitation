@@ -56,51 +56,29 @@ def _get_llm(model_id: str, device: torch.device):
         return tokenizer, model
 
 
-LANGUAGE_LABELS = {
-    "en": "English",
-    "hi": "Hindi",
-    "es": "Spanish",
-    "fr": "French",
-    "de": "German",
-    "it": "Italian",
-    "pt": "Portuguese",
-    "ru": "Russian",
-    "ja": "Japanese",
-    "ko": "Korean",
-    "zh": "Chinese",
-    "ar": "Arabic",
-    "ta": "Tamil",
-    "te": "Telugu",
-    "bn": "Bengali",
-    "mr": "Marathi",
-    "ur": "Urdu",
-}
-
-
-def language_label(code: str) -> str:
-    return LANGUAGE_LABELS.get((code or "en").lower(), code or "English")
-
-
+from src.asr.whisper_languages import language_label
 def answer_from_context_fast(
     context: str,
     question: str,
     *,
     language: str = "en",
     transcript_original: str = "",
+    languages: list[str] | None = None,
 ) -> str:
     """Instant answer without loading the LLM (fast_mode)."""
     ctx = (context or "").strip()
     q = (question or "What can be inferred from the audio?").strip()
     lang = (language or "en").lower()
+    langs = languages or []
 
     if "[No speech detected]" in ctx and "[No environmental sounds detected]" in ctx:
-        if lang == "en":
+        if lang == "en" and len(langs) <= 1:
             return "No clear speech or identifiable sounds were detected in this clip."
         if transcript_original.strip():
             return transcript_original.strip()
         return "No clear speech or identifiable sounds were detected in this clip."
 
-    if lang != "en" and transcript_original.strip():
+    if (lang != "en" or lang == "multi" or len(langs) > 1) and transcript_original.strip():
         return transcript_original.strip()
 
     compact = " ".join(line.strip() for line in ctx.splitlines() if line.strip())
@@ -116,6 +94,7 @@ def answer_question_from_context(
     no_repeat_ngram_size: int = 3,
     device: Optional[torch.device] = None,
     response_language: str = "en",
+    languages: list[str] | None = None,
 ) -> str:
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -127,12 +106,15 @@ def answer_question_from_context(
         context = context[:800] + "…"
 
     lang = (response_language or "en").lower()
-    lang_name = language_label(lang)
-    lang_instruction = (
-        "Answer in English."
-        if lang == "en"
-        else f"Answer in {lang_name} ({lang}). Do not answer in English."
-    )
+    lang_list = languages or []
+    if len(lang_list) > 1:
+        names = ", ".join(language_label(code) for code in lang_list)
+        lang_instruction = f"Answer using the same languages detected in the audio ({names})."
+    elif lang == "en":
+        lang_instruction = "Answer in English."
+    else:
+        lang_name = language_label(lang)
+        lang_instruction = f"Answer in {lang_name} ({lang}). Do not answer in English."
 
     prompt = (
         f"{lang_instruction} Answer briefly from this audio context.\n\n"

@@ -24,7 +24,11 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
-    const stages = ["Transcribing speech…", "Building answer…"];
+    const stages = [
+      "Detecting languages…",
+      "Scanning sound effects…",
+      "Building answer…",
+    ];
     let i = 0;
     setLoadingStage(stages[0]);
     const timer = setInterval(() => {
@@ -68,7 +72,8 @@ export default function Home() {
           </h1>
           <p className="mt-3 text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed text-sm sm:text-base">
             Upload a clip and get speech transcription, sound events, speaker
-            emotion, and an AI-generated answer — all in one analysis.
+            emotion, and an AI-generated answer — with automatic multi-language
+            and multi-sound detection.
           </p>
         </section>
 

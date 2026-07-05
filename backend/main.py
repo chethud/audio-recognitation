@@ -416,7 +416,16 @@ async def analyze(
     transcript = result.get("transcript", "") or ""
     transcript_original = result.get("transcript_original", "") or ""
     language = result.get("language", "en") or "en"
-    sounds = _sound_events_to_labels(result.get("sound_events") or [])
+    language_name = result.get("language_name", "English") or "English"
+    languages = result.get("languages") or []
+    language_names = result.get("language_names") or []
+    sound_events = result.get("sound_events") or []
+    sounds = _sound_events_to_labels(sound_events)
+    sound_details = [
+        {"label": e.get("label", ""), "score": e.get("score", 0)}
+        for e in sound_events
+        if isinstance(e, dict) and e.get("label")
+    ]
     emotion = result.get("emotion", "") or "neutral"
 
     alm = _alm_settings()
@@ -437,7 +446,11 @@ async def analyze(
         transcript=transcript,
         transcript_original=transcript_original,
         language=language,
+        language_name=language_name,
+        languages=languages,
+        language_names=language_names,
         sounds=sounds,
+        sound_details=sound_details,
         emotion=emotion,
         answer=answer,
         question=question.strip(),

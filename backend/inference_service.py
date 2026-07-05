@@ -60,12 +60,12 @@ def warmup() -> None:
         from src.asr.whisper_asr import _get_asr_pipe
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        mode = "fast (ASR only)" if fast else "full (ASR + SED + emotion + LLM)"
+        mode = "fast (ASR + SED)" if fast else "full (ASR + SED + emotion + LLM)"
         logger.info("Warming up models [%s] on %s …", mode, device)
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if not fast and sed_cfg.get("enabled", True):
+        if sed_cfg.get("enabled", True):
             from src.sed.sed_module import _get_sed_pipe
 
             _get_sed_pipe(
@@ -130,8 +130,10 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 sed_model_id=sed_cfg.get(
                     "model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"
                 ),
-                sed_top_k=sed_cfg.get("top_k", 3),
-                sed_threshold=sed_cfg.get("threshold", 0.35),
+                sed_top_k=sed_cfg.get("top_k", 8),
+                sed_threshold=sed_cfg.get("threshold", 0.12),
+                sed_segment_sec=sed_cfg.get("segment_sec", 2.0),
+                asr_segment_sec=asr_cfg.get("segment_sec", 2.5),
                 llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
                 max_new_tokens=llm_cfg.get("max_new_tokens", 32),
                 repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
@@ -149,6 +151,9 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 "transcript": result["transcript"],
                 "transcript_original": result.get("transcript_original", ""),
                 "language": result.get("language", "en"),
+                "language_name": result.get("language_name", "English"),
+                "languages": result.get("languages", []),
+                "language_names": result.get("language_names", []),
                 "sound_events": result["sound_events"],
                 "emotion": result.get("emotion", "neutral"),
                 "context": result["context"],

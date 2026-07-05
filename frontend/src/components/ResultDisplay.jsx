@@ -15,7 +15,10 @@ const LANGUAGE_LABELS = {
   te: "Telugu",
   bn: "Bengali",
   mr: "Marathi",
-  ur: "Urdu",
+  kn: "Kannada",
+  ml: "Malayalam",
+  gu: "Gujarati",
+  pa: "Punjabi",
 };
 
 function languageLabel(code) {
@@ -64,8 +67,34 @@ export default function ResultDisplay({ result, error, loading }) {
     );
   }
 
-  const { transcript, sounds, emotion, answer, language } = result;
-  const answerLang = language && language !== "en" ? languageLabel(language) : null;
+  const {
+    transcript,
+    transcript_original,
+    sounds,
+    sound_details,
+    emotion,
+    answer,
+    language,
+    language_name,
+    languages,
+    language_names,
+  } = result;
+
+  const langTags =
+    (language_names && language_names.length > 0
+      ? language_names
+      : languages?.map(languageLabel)) || [];
+  const multiLang = langTags.length > 1;
+  const detectedLabel = multiLang
+    ? langTags.join(", ")
+    : language_name || languageLabel(language);
+  const answerLang =
+    multiLang || (language && language !== "en") ? detectedLabel : null;
+
+  const soundItems =
+    sound_details && sound_details.length > 0
+      ? sound_details
+      : (sounds || []).map((label) => ({ label, score: null }));
 
   const sections = [
     {
@@ -73,23 +102,50 @@ export default function ResultDisplay({ result, error, loading }) {
       label: "Transcript (English)",
       accent: "violet",
       content: (
-        <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
-          {transcript || "—"}
-        </p>
+        <>
+          {langTags.length > 0 ? (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {langTags.map((name) => (
+                <span
+                  key={name}
+                  className="rounded-full border border-violet-400/25 bg-violet-500/10 px-2 py-0.5 text-xs text-violet-200"
+                >
+                  {name}
+                </span>
+              ))}
+            </div>
+          ) : null}
+          <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base">
+            {transcript || "—"}
+          </p>
+          {multiLang && transcript_original ? (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-xs text-violet-300/70 mb-1">Original (by segment)</p>
+              <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
+                {transcript_original}
+              </p>
+            </div>
+          ) : null}
+        </>
       ),
     },
     {
       key: "sounds",
-      label: "Detected sounds",
+      label: `Detected sounds${soundItems.length ? ` (${soundItems.length})` : ""}`,
       accent: "violet",
       content: (
         <div className="flex flex-wrap gap-2">
-          {(sounds || []).length === 0 ? (
+          {soundItems.length === 0 ? (
             <span className="text-slate-500 text-sm">No sounds detected</span>
           ) : (
-            sounds.map((s) => (
-              <span key={s} className="glass-tag">
-                {s}
+            soundItems.map((s) => (
+              <span key={s.label} className="glass-tag">
+                {s.label}
+                {s.score != null ? (
+                  <span className="ml-1 text-violet-200/60">
+                    {Math.round(s.score * 100)}%
+                  </span>
+                ) : null}
               </span>
             ))
           )}

@@ -34,7 +34,11 @@ class AnalyzeResponse(BaseModel):
     transcript: str = ""
     transcript_original: str = ""
     language: str = "en"
+    language_name: str = "English"
+    languages: List[str] = []
+    language_names: List[str] = []
     sounds: List[str] = []
+    sound_details: List[dict] = []
     emotion: str = ""
     answer: str = ""
     question: str = ""

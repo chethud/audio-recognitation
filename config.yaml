@@ -19,13 +19,15 @@ alm_lite:
   fast_mode: true   # ASR-only locally — full stack needs more RAM/page file
   store_uploaded_audio: false
   asr:
-    model_id: "openai/whisper-tiny"
-    language: null   # auto-detect; transcript shown in English, answer in detected language
+    model_id: "openai/whisper-base"   # better multilingual/Kannada than whisper-tiny
+    language: null   # auto-detect per segment
+    segment_sec: 2.5   # scan clip in chunks for multiple languages
   sed:
     enabled: true
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 3
-    threshold: 0.35
+    top_k: 8
+    threshold: 0.12
+    segment_sec: 2.0   # scan clip in windows for multiple sound effects
   emotion:
     enabled: false   # disabled locally — large model can crash on low RAM
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
