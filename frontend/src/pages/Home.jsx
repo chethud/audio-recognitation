@@ -68,7 +68,7 @@ export default function Home() {
             Full audio understanding pipeline
           </p>
           <h1 className="font-display text-3xl sm:text-4xl lg:text-[2.75rem] font-bold text-gradient tracking-tight leading-tight max-w-2xl mx-auto lg:mx-0">
-            Understand audio beyond words
+            Understand Audio Beyond Words
           </h1>
           <p className="mt-3 text-slate-400 max-w-xl mx-auto lg:mx-0 leading-relaxed text-sm sm:text-base">
             Upload a clip and get speech transcription, sound events, speaker
