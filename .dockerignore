@@ -1,0 +1,15 @@
+.git
+.venv
+venv
+__pycache__
+*.pyc
+.pytest_cache
+frontend/node_modules
+frontend/dist
+data/datasets
+data/alm.db
+.env
+.env.local
+*.pt
+outputs/*.pt
+terminals

@@ -1,0 +1,20 @@
+# Render Blueprint — https://render.com/docs/blueprint-spec
+# Deploy: Render Dashboard → New → Blueprint → connect this repo
+services:
+  - type: web
+    name: alm-lite-api
+    runtime: docker
+    plan: standard
+    region: oregon
+    branch: main
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /health
+    envVars:
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: TORCHDYNAMO_DISABLE
+        value: "1"
+      - key: HF_HOME
+        value: /app/.cache/huggingface
+      - key: PORT
+        value: "8000"
