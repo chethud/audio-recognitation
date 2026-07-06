@@ -9,6 +9,7 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
 from pathlib import Path
 
 from src.env_setup import configure_ml_env
@@ -215,16 +216,21 @@ def _mime_for_suffix(suffix: str) -> str:
 @app.on_event("startup")
 def startup():
     database.init_db()
-    if not _use_subprocess_inference():
+    if _use_subprocess_inference():
+        return
+
+    def _warmup_background() -> None:
         logger.info(
-            "Loading full AI stack (Whisper + SED + emotion + LLM). "
-            "First start may take 3–5 minutes; keep this window open…"
+            "Loading AI models in background (Whisper + SED + emotion). "
+            "Port is open; /health will show model_ready=true when done."
         )
         try:
             inference_service.warmup()
             logger.info("All models loaded — ready for analysis.")
         except Exception:
             logger.exception("Model warmup failed")
+
+    threading.Thread(target=_warmup_background, daemon=True).start()
 
 
 @app.get("/health", response_model=HealthResponse)
