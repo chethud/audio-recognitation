@@ -120,18 +120,64 @@ export async function logoutRequest() {
  * @param {File} file
  * @param {string} question
  */
-export async function analyzeAudio(file, question) {
+export async function analyzeAudio(file, question, { onStatus } = {}) {
+  await waitForModelsReady({ onStatus });
+
   const uploadFile = await prepareUploadFile(file);
   const form = new FormData();
   form.append("file", uploadFile);
   form.append("question", question || "What can be inferred from the audio?");
-  const { data } = await client.post("/analyze", form, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
-  return data;
+
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const { data } = await client.post("/analyze", form, {
+        headers: { "Content-Type": "multipart/form-data" },
+      });
+      return data;
+    } catch (err) {
+      if (isModelsLoadingError(err) && attempt < 2) {
+        onStatus?.("loading");
+        await waitForModelsReady({ onStatus });
+        continue;
+      }
+      throw err;
+    }
+  }
 }
 
 export async function health() {
-  const { data } = await client.get("/health");
+  const { data } = await client.get("/health", { timeout: 120_000 });
   return data;
+}
+
+/** Poll /health until model_ready or timeout (Render cold start + Whisper download). */
+export async function waitForModelsReady({
+  timeoutMs = 900_000,
+  intervalMs = 4_000,
+  onStatus,
+} = {}) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    try {
+      const data = await health();
+      if (data?.model_ready) {
+        onStatus?.("ready");
+        return data;
+      }
+      onStatus?.("loading");
+    } catch {
+      onStatus?.("waking");
+    }
+    await new Promise((r) => setTimeout(r, intervalMs));
+  }
+  throw new Error(
+    "AI models are still starting on the server. Wait 2–3 minutes and try again."
+  );
+}
+
+function isModelsLoadingError(err) {
+  const status = err?.response?.status;
+  const detail = err?.response?.data?.detail;
+  const msg = typeof detail === "string" ? detail : "";
+  return status === 503 && msg.toLowerCase().includes("still loading");
 }

@@ -92,11 +92,16 @@ def warmup() -> None:
 
             cnn_ready = warmup_cnn(cfg)
 
+        sed_backend = str(sed_cfg.get("backend", "auto")).lower()
+        skip_hf_sed = sed_backend == "cnn" and not cnn_ready
+
         if fast:
             if cnn_ready and cnn_sed and cnn_emo:
                 mode = "fast (ASR + CNN SED + CNN emotion)"
             elif cnn_ready and cnn_sed:
                 mode = "fast (ASR + CNN SED)"
+            elif skip_hf_sed or not sed_cfg.get("enabled", True):
+                mode = "fast (ASR only)"
             else:
                 mode = "fast (ASR + SED)"
         else:
@@ -105,7 +110,11 @@ def warmup() -> None:
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if sed_cfg.get("enabled", True) and not (cnn_ready and cnn_sed):
+        if (
+            sed_cfg.get("enabled", True)
+            and not (cnn_ready and cnn_sed)
+            and not skip_hf_sed
+        ):
             try:
                 from src.sed.sed_module import _get_sed_pipe
 
@@ -115,6 +124,10 @@ def warmup() -> None:
                 )
             except Exception as exc:
                 logger.warning("HF SED warmup skipped: %s", exc)
+        elif skip_hf_sed:
+            logger.info(
+                "SED backend is cnn but checkpoints are missing — skipping HF AST download."
+            )
         emo_on = emo_cfg.get("enabled", True)
         if emo_on and not fast and not (cnn_ready and cnn_emo):
             from src.emotion.emotion_module import _get_emotion_pipeline

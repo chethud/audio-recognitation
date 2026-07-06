@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { analyzeAudio } from "../api/api.js";
+import { useEffect, useState } from "react";
+import { analyzeAudio, health } from "../api/api.js";
 import UploadAudio from "../components/UploadAudio.jsx";
 import ResultDisplay from "../components/ResultDisplay.jsx";
 import GlassBackground from "../components/GlassBackground.jsx";
@@ -18,6 +18,30 @@ export default function Home() {
   const [loadingStage, setLoadingStage] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
+  const [apiStatus, setApiStatus] = useState("checking");
+
+  useEffect(() => {
+    let cancelled = false;
+    async function poll() {
+      try {
+        const data = await health();
+        if (cancelled) return;
+        setApiStatus(data?.model_ready ? "ready" : "loading");
+        if (!data?.model_ready) {
+          setTimeout(poll, 5000);
+        }
+      } catch {
+        if (!cancelled) {
+          setApiStatus("waking");
+          setTimeout(poll, 5000);
+        }
+      }
+    }
+    poll();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function handleSubmit() {
     if (!file) return;
@@ -25,6 +49,8 @@ export default function Home() {
     setError(null);
     setResult(null);
     const stages = [
+      "Starting server (first visit may take 1–2 min)…",
+      "Loading speech model…",
       "Detecting languages…",
       "Scanning sound effects…",
       "Building answer…",
@@ -36,7 +62,14 @@ export default function Home() {
       setLoadingStage(stages[i]);
     }, 4000);
     try {
-      const data = await analyzeAudio(file, question);
+      const data = await analyzeAudio(file, question, {
+        onStatus: (s) => {
+          if (s === "ready") setApiStatus("ready");
+          else if (s === "loading") setLoadingStage("Loading AI models on server…");
+          else if (s === "waking") setLoadingStage("Waking up API server…");
+        },
+      });
+      setApiStatus("ready");
       setResult(data);
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -75,6 +108,15 @@ export default function Home() {
             emotion, and an AI-generated answer — with automatic multi-language
             and multi-sound detection.
           </p>
+          {apiStatus !== "ready" ? (
+            <p className="mt-4 text-sm text-amber-200/90 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 max-w-xl mx-auto lg:mx-0">
+              {apiStatus === "checking" && "Checking API…"}
+              {apiStatus === "waking" &&
+                "API server is waking up — first load can take 1–2 minutes."}
+              {apiStatus === "loading" &&
+                "AI models are loading on the server — you can upload now; analysis will start automatically when ready."}
+            </p>
+          ) : null}
         </section>
 
         <div className="grid gap-6 lg:grid-cols-12 lg:gap-8 items-start">

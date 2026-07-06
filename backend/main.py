@@ -233,6 +233,16 @@ def startup():
     threading.Thread(target=_warmup_background, daemon=True).start()
 
 
+@app.get("/")
+def root():
+    return {
+        "service": "ALM-Lite API",
+        "health": "/health",
+        "docs": "/docs",
+        "model_ready": inference_service.is_ready() or _use_subprocess_inference(),
+    }
+
+
 @app.get("/health", response_model=HealthResponse)
 def health():
     ready = inference_service.is_ready() or _use_subprocess_inference()

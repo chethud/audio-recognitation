@@ -36,6 +36,9 @@ export default function ResultDisplay({ result, error, loading }) {
       <div className="glass-panel-subtle px-4 py-10 text-center">
         <span className="inline-block h-8 w-8 rounded-full border-2 border-violet-400/30 border-t-violet-300 animate-spin mb-3" />
         <p className="text-slate-400 text-sm">Running full analysis…</p>
+        <p className="text-slate-500 text-xs mt-2">
+          First request may wait while the server loads models.
+        </p>
       </div>
     );
   }
