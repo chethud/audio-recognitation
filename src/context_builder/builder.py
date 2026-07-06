@@ -11,6 +11,7 @@ def build_structured_context(
     *,
     emotion: Optional[str] = None,
     include_scores: bool = False,
+    speaker_turns: Optional[List[dict]] = None,
     template: Optional[str] = None,
 ) -> str:
     """
@@ -30,6 +31,17 @@ def build_structured_context(
     if not speech_part:
         speech_part = "[No speech detected]"
 
+    speaker_part = ""
+    if speaker_turns:
+        lines = []
+        for t in speaker_turns:
+            who = t.get("speaker", "Speaker")
+            text = (t.get("text") or "").strip()
+            if text:
+                lines.append(f"{who}: {text}")
+        if lines:
+            speaker_part = "Speaker-separated transcript:\n" + "\n".join(lines)
+
     if sound_events:
         if include_scores:
             event_str = ", ".join(
@@ -45,8 +57,9 @@ def build_structured_context(
     if template is not None:
         return template.format(transcript=speech_part, events=non_speech_part, emotion=emo)
 
-    return (
-        f"Speech (transcript): {speech_part}\n"
-        f"Speaker emotion (estimated): {emo}\n"
-        f"Non-speech (environmental sounds): {non_speech_part}"
-    )
+    parts = [f"Speech (transcript): {speech_part}"]
+    if speaker_part:
+        parts.append(speaker_part)
+    parts.append(f"Speaker emotion (estimated): {emo}")
+    parts.append(f"Non-speech (environmental sounds): {non_speech_part}")
+    return "\n".join(parts)

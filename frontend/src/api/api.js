@@ -3,8 +3,8 @@ import axios from "axios";
 const base =
   (typeof import.meta !== "undefined" && import.meta.env?.VITE_API_BASE) || "";
 
-/** Must match backend `data.max_audio_length_sec` in config.yaml */
-const MAX_ANALYZE_SEC = 30;
+/** 0 = upload/decode full file; must match backend `data.max_audio_length_sec` */
+const MAX_ANALYZE_SEC = 0;
 /** Skip browser decode for very large files (server trims instead). */
 const MAX_CLIENT_TRIM_BYTES = 12 * 1024 * 1024;
 
@@ -61,10 +61,10 @@ function encodeWav(samples, sampleRate) {
 }
 
 /**
- * Upload only the first few seconds so long files upload and decode faster.
+ * Optionally trim before upload (skipped when MAX_ANALYZE_SEC is 0).
  */
 async function prepareUploadFile(file) {
-  if (!file || file.size > MAX_CLIENT_TRIM_BYTES) {
+  if (!file || MAX_ANALYZE_SEC <= 0 || file.size > MAX_CLIENT_TRIM_BYTES) {
     return file;
   }
 
@@ -120,13 +120,17 @@ export async function logoutRequest() {
  * @param {File} file
  * @param {string} question
  */
-export async function analyzeAudio(file, question, { onStatus } = {}) {
-  await waitForModelsReady({ onStatus });
+export async function analyzeAudio(file, question, { onStatus, skipWarmup = false } = {}) {
+  if (!skipWarmup) {
+    await waitForModelsReady({ onStatus, timeoutMs: 180_000 });
+  }
 
   const uploadFile = await prepareUploadFile(file);
   const form = new FormData();
   form.append("file", uploadFile);
   form.append("question", question || "What can be inferred from the audio?");
+
+  onStatus?.("analyzing");
 
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
@@ -137,7 +141,7 @@ export async function analyzeAudio(file, question, { onStatus } = {}) {
     } catch (err) {
       if (isModelsLoadingError(err) && attempt < 2) {
         onStatus?.("loading");
-        await waitForModelsReady({ onStatus });
+        await waitForModelsReady({ onStatus, timeoutMs: 180_000 });
         continue;
       }
       throw err;
@@ -146,7 +150,7 @@ export async function analyzeAudio(file, question, { onStatus } = {}) {
 }
 
 export async function health() {
-  const { data } = await client.get("/health", { timeout: 120_000 });
+  const { data } = await client.get("/health", { timeout: 15_000 });
   return data;
 }
 

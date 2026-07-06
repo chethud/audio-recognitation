@@ -14,6 +14,36 @@ import torch
 
 logger = logging.getLogger(__name__)
 
+_FFMPEG_FORMATS = {
+    ".mp3",
+    ".mp4",
+    ".m4a",
+    ".mkv",
+    ".webm",
+    ".avi",
+    ".mov",
+    ".aac",
+    ".wma",
+    ".mpeg",
+    ".mpg",
+}
+
+
+def _find_ffmpeg() -> str | None:
+    """System ffmpeg on PATH, else bundled binary from imageio-ffmpeg (moviepy dep)."""
+    exe = shutil.which("ffmpeg")
+    if exe:
+        return exe
+    try:
+        import imageio_ffmpeg
+
+        bundled = imageio_ffmpeg.get_ffmpeg_exe()
+        if bundled and Path(bundled).is_file():
+            return bundled
+    except Exception as exc:
+        logger.debug("imageio_ffmpeg unavailable: %s", exc)
+    return None
+
 
 def _resample_if_needed(y: np.ndarray, file_sr: int, target_sr: int) -> np.ndarray:
     if file_sr == target_sr:
@@ -40,8 +70,8 @@ def _load_with_soundfile(path: Path, sr: int, max_sec: float) -> torch.Tensor | 
 
 
 def _load_with_ffmpeg(path: Path, sr: int, max_sec: float) -> torch.Tensor | None:
-    """Extract only the first N seconds via ffmpeg (fast for long MP3/M4A/video)."""
-    ffmpeg = shutil.which("ffmpeg")
+    """Decode via ffmpeg (partial when max_sec > 0, full file when max_sec == 0)."""
+    ffmpeg = _find_ffmpeg()
     if not ffmpeg:
         return None
 
@@ -52,8 +82,6 @@ def _load_with_ffmpeg(path: Path, sr: int, max_sec: float) -> torch.Tensor | Non
         "error",
         "-i",
         str(path),
-        "-t",
-        str(max_sec),
         "-ac",
         "1",
         "-ar",
@@ -62,10 +90,22 @@ def _load_with_ffmpeg(path: Path, sr: int, max_sec: float) -> torch.Tensor | Non
         "wav",
         "pipe:1",
     ]
+    if max_sec and max_sec > 0:
+        cmd[6:6] = ["-t", str(max_sec)]
+
+    timeout = 90
+    if not max_sec or max_sec <= 0:
+        # Scale timeout for long videos (up to 15 min decode).
+        try:
+            size_mb = path.stat().st_size / (1024 * 1024)
+            timeout = int(min(900, max(120, size_mb * 12)))
+        except OSError:
+            timeout = 300
+
     try:
-        proc = subprocess.run(cmd, capture_output=True, check=True, timeout=90)
+        proc = subprocess.run(cmd, capture_output=True, check=True, timeout=timeout)
     except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
-        logger.debug("ffmpeg trim failed for %s: %s", path.name, e)
+        logger.warning("ffmpeg decode failed for %s: %s", path.name, e)
         return None
 
     if not proc.stdout:
@@ -96,18 +136,22 @@ def load_audio_from_file(
         raise FileNotFoundError(path)
 
     limit = float(max_sec) if max_sec and float(max_sec) > 0 else 0.0
+    suffix = path.suffix.lower()
 
-    if limit > 0:
-        # Prefer ffmpeg for compressed/long media; soundfile for native PCM formats.
-        suffix = path.suffix.lower()
-        if suffix in {".wav", ".flac", ".ogg"}:
-            tensor = _load_with_soundfile(path, sr, limit)
-            if tensor is not None:
-                return tensor
-        else:
-            tensor = _load_with_ffmpeg(path, sr, limit)
-            if tensor is not None:
-                return tensor
+    if suffix in {".wav", ".flac", ".ogg"}:
+        tensor = _load_with_soundfile(path, sr, limit)
+        if tensor is not None:
+            return tensor
+
+    tensor = _load_with_ffmpeg(path, sr, limit)
+    if tensor is not None:
+        return tensor
+
+    if suffix in _FFMPEG_FORMATS:
+        raise RuntimeError(
+            "Could not decode this audio/video file. Install ffmpeg on PATH or run: "
+            "pip install imageio-ffmpeg"
+        )
 
     load_kw: dict = {"sr": sr, "mono": True}
     if limit > 0:

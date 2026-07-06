@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import threading
+import asyncio
 from pathlib import Path
 
 from src.env_setup import configure_ml_env
@@ -417,8 +418,12 @@ async def analyze(
         qfile = tmpdir / "question.txt"
         qfile.write_text(question.strip(), encoding="utf-8")
 
-        result = _run_inference_worker_modular(
-            str(tmp_path), question.strip(), str(output_path), str(qfile)
+        result = await asyncio.to_thread(
+            _run_inference_worker_modular,
+            str(tmp_path),
+            question.strip(),
+            str(output_path),
+            str(qfile),
         )
 
     if not result.get("ok"):
@@ -443,6 +448,8 @@ async def analyze(
         if isinstance(e, dict) and e.get("label")
     ]
     emotion = result.get("emotion", "") or "neutral"
+    speaker_turns = result.get("speaker_turns") or []
+    num_speakers = int(result.get("num_speakers") or 0)
 
     alm = _alm_settings()
     store_audio = bool(alm.get("store_uploaded_audio", False))
@@ -472,6 +479,8 @@ async def analyze(
         question=question.strip(),
         audio_filename=file.filename,
         log_id=None,
+        speaker_turns=speaker_turns,
+        num_speakers=num_speakers,
     )
 
 

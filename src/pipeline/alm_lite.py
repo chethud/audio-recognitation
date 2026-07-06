@@ -40,6 +40,8 @@ def _run_asr_sed_emo(
     max_duration_sec: Optional[float],
     asr_segment_sec: float,
     asr_max_segments: int,
+    diarization_enabled: bool,
+    diarization_cfg: dict,
     sed_enabled: bool,
     sed_model_id: str,
     sed_top_k: int,
@@ -61,34 +63,54 @@ def _run_asr_sed_emo(
         max_duration_sec=max_duration_sec,
         segment_sec=asr_segment_sec,
         max_segments=asr_max_segments,
+        diarization_enabled=diarization_enabled,
+        diarization_max_speakers=int(diarization_cfg.get("max_speakers", 6)),
+        diarization_window_sec=float(diarization_cfg.get("window_sec", 1.2)),
+        diarization_hop_sec=float(diarization_cfg.get("hop_sec", 0.6)),
+        diarization_min_segment_sec=float(diarization_cfg.get("min_segment_sec", 0.4)),
+        diarization_distance_threshold=float(
+            diarization_cfg.get("distance_threshold", 0.72)
+        ),
+        diarization_max_sec=float(diarization_cfg.get("max_audio_sec", 0)),
     )
-    sound_events = (
-        detect_sound_events_segmented(
-            wav,
-            sample_rate=sample_rate,
-            model_id=sed_model_id,
-            device=device,
-            top_k=sed_top_k,
-            threshold=sed_threshold,
-            segment_sec=sed_segment_sec,
-            max_windows=sed_max_windows,
-            backend=sed_backend,
-        )
-        if sed_enabled
-        else []
-    )
-    emotion_label = (
-        predict_emotion_from_audio(
-            wav,
-            sample_rate=sample_rate,
-            model_id=emo_id,
-            device=device,
-            enabled=True,
-            backend=emotion_backend,
-        )
-        if emotion_enabled
-        else "neutral"
-    )
+
+    # Run SED + emotion in parallel after ASR (Whisper must finish first on CPU).
+    sound_events: list = []
+    emotion_label = "neutral"
+    if sed_enabled or emotion_enabled:
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            f_sed = (
+                pool.submit(
+                    detect_sound_events_segmented,
+                    wav,
+                    sample_rate=sample_rate,
+                    model_id=sed_model_id,
+                    device=device,
+                    top_k=sed_top_k,
+                    threshold=sed_threshold,
+                    segment_sec=sed_segment_sec,
+                    max_windows=sed_max_windows,
+                    backend=sed_backend,
+                )
+                if sed_enabled
+                else None
+            )
+            f_emo = (
+                pool.submit(
+                    predict_emotion_from_audio,
+                    wav,
+                    sample_rate=sample_rate,
+                    model_id=emo_id,
+                    device=device,
+                    enabled=True,
+                    backend=emotion_backend,
+                )
+                if emotion_enabled
+                else None
+            )
+            sound_events = f_sed.result() if f_sed else []
+            emotion_label = f_emo.result() if f_emo else "neutral"
+
     return asr, sound_events, emotion_label
 
 
@@ -107,6 +129,8 @@ def run_alm_lite(
     asr_language: Optional[str] = None,
     asr_segment_sec: float = 4.0,
     asr_max_segments: int = 2,
+    diarization_enabled: bool = False,
+    diarization_cfg: Optional[dict] = None,
     sed_top_k: int = 5,
     sed_threshold: float = 0.15,
     sed_segment_sec: float = 3.0,
@@ -136,6 +160,7 @@ def run_alm_lite(
             emotion_enabled = False
 
     emo_id = emotion_model_id or "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
+    dia_cfg = diarization_cfg or {}
 
     common = dict(
         audio=audio,
@@ -145,6 +170,8 @@ def run_alm_lite(
         max_duration_sec=max_duration_sec,
         asr_segment_sec=asr_segment_sec,
         asr_max_segments=asr_max_segments,
+        diarization_enabled=diarization_enabled,
+        diarization_cfg=dia_cfg,
         sed_enabled=sed_enabled,
         sed_model_id=sed_model_id,
         sed_top_k=sed_top_k,
@@ -169,6 +196,15 @@ def run_alm_lite(
                 max_duration_sec=max_duration_sec,
                 segment_sec=asr_segment_sec,
                 max_segments=asr_max_segments,
+                diarization_enabled=diarization_enabled,
+                diarization_max_speakers=int(dia_cfg.get("max_speakers", 6)),
+                diarization_window_sec=float(dia_cfg.get("window_sec", 1.2)),
+                diarization_hop_sec=float(dia_cfg.get("hop_sec", 0.6)),
+                diarization_min_segment_sec=float(dia_cfg.get("min_segment_sec", 0.4)),
+                diarization_distance_threshold=float(
+                    dia_cfg.get("distance_threshold", 0.72)
+                ),
+                diarization_max_sec=float(dia_cfg.get("max_audio_sec", 0)),
             )
             f_sed = (
                 pool.submit(
@@ -212,12 +248,15 @@ def run_alm_lite(
     language_name = asr.language_name
     languages = asr.languages
     language_names = asr.language_names
+    speaker_turns = asr.speaker_turns
+    num_speakers = asr.num_speakers
 
     context = build_structured_context(
         transcript,
         sound_events,
         emotion=emotion_label,
         include_scores=include_sed_scores,
+        speaker_turns=speaker_turns,
     )
 
     response_lang = language
@@ -240,6 +279,7 @@ def run_alm_lite(
             transcript=transcript,
             emotion=emotion_label,
             sound_labels=sound_labels,
+            speaker_turns=speaker_turns,
         )
     else:
         answer = answer_question_from_context(
@@ -261,6 +301,8 @@ def run_alm_lite(
         "language_name": language_name,
         "languages": languages,
         "language_names": language_names,
+        "speaker_turns": speaker_turns,
+        "num_speakers": num_speakers,
         "sound_events": sound_events,
         "emotion": emotion_label,
         "context": context,

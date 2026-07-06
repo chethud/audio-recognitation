@@ -6,6 +6,12 @@ const FEATURES = [
     desc: "Converts spoken words into a text transcript from your audio.",
   },
   {
+    icon: "👥",
+    title: "Speaker separation",
+    model: "Wav2Vec2",
+    desc: "Labels who said what when two or more people are talking (Person 1, Person 2, …).",
+  },
+  {
     icon: "🔊",
     title: "Sound detection",
     model: "AST",

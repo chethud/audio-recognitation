@@ -72,6 +72,7 @@ def warmup() -> None:
         asr_cfg = alm.get("asr", {})
         sed_cfg = alm.get("sed", {})
         emo_cfg = alm.get("emotion", {})
+        dia_cfg = alm.get("diarization", {})
         llm_cfg = alm.get("llm", {})
 
         import torch
@@ -143,6 +144,7 @@ def warmup() -> None:
             from src.cnn.loader import _load_emo_bundle
 
             _load_emo_bundle(cfg)
+        # Diarization (Wav2Vec2) loads on first analyze — keeps /health fast at startup.
         if not fast and llm_cfg.get("enabled", True):
             from src.reasoning.llm_reasoning import _get_llm
 
@@ -169,6 +171,7 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
     sed_cfg = alm.get("sed", {})
     llm_cfg = alm.get("llm", {})
     emo_cfg = alm.get("emotion", {})
+    dia_cfg = alm.get("diarization", {})
     max_sec = data_cfg.get("max_audio_length_sec", 10)
 
     # Decode only the first N seconds (do not hold model lock while loading file).
@@ -197,6 +200,8 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 sed_max_windows=sed_cfg.get("max_windows", 2),
                 asr_segment_sec=asr_cfg.get("segment_sec", 4.0),
                 asr_max_segments=asr_cfg.get("max_segments", 2),
+                diarization_enabled=bool(dia_cfg.get("enabled", False)),
+                diarization_cfg=dia_cfg,
                 llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
                 max_new_tokens=llm_cfg.get("max_new_tokens", 32),
                 repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
@@ -219,6 +224,8 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 "language_name": result.get("language_name", "English"),
                 "languages": result.get("languages", []),
                 "language_names": result.get("language_names", []),
+                "speaker_turns": result.get("speaker_turns", []),
+                "num_speakers": result.get("num_speakers", 0),
                 "sound_events": result["sound_events"],
                 "emotion": result.get("emotion", "neutral"),
                 "context": result["context"],

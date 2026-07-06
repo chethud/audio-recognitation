@@ -78,6 +78,7 @@ def answer_from_context_fast(
     transcript: str = "",
     emotion: str = "neutral",
     sound_labels: list[str] | None = None,
+    speaker_turns: list[dict] | None = None,
 ) -> str:
     """Build a readable answer without loading the LLM (fast_mode)."""
     lang = (language or "en").lower()
@@ -85,6 +86,7 @@ def answer_from_context_fast(
     sounds = sound_labels or []
     speech = (transcript or "").strip()
     emo = (emotion or "neutral").strip().capitalize()
+    turns = speaker_turns or []
 
     has_speech = is_meaningful_speech(speech)
     has_sounds = bool(sounds)
@@ -97,7 +99,14 @@ def answer_from_context_fast(
     if has_sounds:
         lines.append(f"Sounds detected: {_format_sound_summary(sounds)}.")
 
-    if has_speech:
+    if turns and len({t.get("speaker") for t in turns}) >= 2:
+        lines.append("Conversation by speaker:")
+        for t in turns:
+            who = t.get("speaker", "Speaker")
+            text = (t.get("text") or "").strip()
+            if text:
+                lines.append(f"  {who}: {text}")
+    elif has_speech:
         display = speech
         if (lang != "en" or lang == "multi" or len(langs) > 1) and transcript_original.strip():
             display = transcript_original.strip()

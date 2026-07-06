@@ -66,6 +66,7 @@ def main():
         sed_cfg = alm.get("sed", {})
         llm_cfg = alm.get("llm", {})
         emo_cfg = alm.get("emotion", {})
+        dia_cfg = alm.get("diarization", {})
 
         audio = load_audio_from_file(
             audio_path,
@@ -90,6 +91,8 @@ def main():
             sed_max_windows=sed_cfg.get("max_windows", 2),
             asr_segment_sec=asr_cfg.get("segment_sec", 4.0),
             asr_max_segments=asr_cfg.get("max_segments", 2),
+            diarization_enabled=bool(dia_cfg.get("enabled", False)),
+            diarization_cfg=dia_cfg,
             llm_model_id=llm_cfg.get("model_id", "Qwen/Qwen2-0.5B-Instruct"),
             max_new_tokens=llm_cfg.get("max_new_tokens", 32),
             repetition_penalty=llm_cfg.get("repetition_penalty", 1.1),
@@ -111,6 +114,8 @@ def main():
             "language_name": result.get("language_name", "English"),
             "languages": result.get("languages", []),
             "language_names": result.get("language_names", []),
+            "speaker_turns": result.get("speaker_turns", []),
+            "num_speakers": result.get("num_speakers", 0),
             "sound_events": result["sound_events"],
             "emotion": result.get("emotion", "neutral"),
             "context": result["context"],

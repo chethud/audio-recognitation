@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Union
 
 from src.asr.whisper_languages import (
@@ -41,6 +41,8 @@ class TranscriptionResult:
     language_name: str
     languages: list[str]
     language_names: list[str]
+    speaker_turns: list[dict] = field(default_factory=list)
+    num_speakers: int = 0
 
 
 def _get_asr_pipe(model_id: str, device: Union[str, torch.device]):
@@ -98,8 +100,8 @@ def _detect_language(pipe, wav: np.ndarray, sample_rate: int) -> str:
         if fe is None:
             return "en"
 
-        # Use up to 30s for reliable detection on short clips.
-        detect_samples = min(len(wav), sample_rate * 30)
+        # Use up to 8s for language detection on long clips (faster).
+        detect_samples = min(len(wav), sample_rate * 8)
         detect_wav = wav[:detect_samples]
 
         inputs = fe([detect_wav], sampling_rate=sample_rate, return_tensors="pt", padding=True)
@@ -144,7 +146,7 @@ def _run_whisper(
     duration_s = len(wav) / max(sample_rate, 1)
     pipe_kwargs: dict = {}
     if duration_s > 30:
-        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 4, "stride_length_s": 5}
+        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 6}
 
     gen_kwargs: dict = {
         "task": task,
@@ -167,6 +169,53 @@ def _run_whisper(
     )
     text = out.get("text", "") if isinstance(out, dict) else str(out)
     return (text or "").strip()
+
+
+def _run_whisper_timestamped(
+    pipe,
+    wav: np.ndarray,
+    sample_rate: int,
+    *,
+    language_code: Optional[str] = None,
+) -> list[tuple[str, tuple[float, float]]]:
+    """Single-pass transcription with (start_sec, end_sec) per phrase."""
+    duration_s = len(wav) / max(sample_rate, 1)
+    pipe_kwargs: dict = {}
+    if duration_s > 30:
+        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 6}
+
+    gen_kwargs: dict = {
+        "task": "transcribe",
+        "condition_on_prev_tokens": False,
+        "num_beams": 1,
+    }
+    whisper_lang = whisper_language_name(language_code)
+    if whisper_lang and whisper_lang != "english":
+        gen_kwargs["language"] = whisper_lang
+    elif language_code == "en":
+        gen_kwargs["language"] = "english"
+
+    out = pipe(
+        {"array": wav, "sampling_rate": sample_rate},
+        return_timestamps=True,
+        generate_kwargs=gen_kwargs,
+        **pipe_kwargs,
+    )
+    chunks = out.get("chunks") if isinstance(out, dict) else None
+    if not chunks:
+        text = out.get("text", "") if isinstance(out, dict) else str(out)
+        if text and text.strip():
+            return [(text.strip(), (0.0, duration_s))]
+        return []
+
+    parsed: list[tuple[str, tuple[float, float]]] = []
+    for item in chunks:
+        text = (item.get("text") or "").strip()
+        ts = item.get("timestamp")
+        if not text or not ts or ts[0] is None or ts[1] is None:
+            continue
+        parsed.append((text, (float(ts[0]), float(ts[1]))))
+    return parsed
 
 
 
@@ -247,9 +296,17 @@ def transcribe_bilingual(
     max_duration_sec: Optional[float] = None,
     segment_sec: float = 4.0,
     max_segments: int = 2,
+    diarization_enabled: bool = False,
+    diarization_max_speakers: int = 6,
+    diarization_window_sec: float = 1.2,
+    diarization_hop_sec: float = 0.6,
+    diarization_min_segment_sec: float = 0.4,
+    diarization_distance_threshold: float = 0.72,
+    diarization_max_sec: float = 0,
 ) -> TranscriptionResult:
     """
     Auto-detect language; transcribe full clip in time windows when needed.
+    When diarization_enabled, label speech by Person 1, Person 2, …
     """
     if device is None:
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -259,14 +316,60 @@ def transcribe_bilingual(
 
     try:
         lang_start, lang_end = _probe_languages(pipe, wav, sample_rate)
+        duration_s = len(wav) / max(sample_rate, 1)
 
-        # Whole clip may be English even when language probe is wrong.
-        if lang_start == lang_end and lang_start != "en":
+        # Skip full-clip English verification on long audio (extra Whisper pass).
+        if (
+            lang_start == lang_end
+            and lang_start != "en"
+            and duration_s < 90
+        ):
             auto_en = _run_whisper(
                 pipe, wav, sample_rate, task="transcribe", language_code=None
             )
             if is_likely_english_text(auto_en):
                 lang_start = lang_end = "en"
+
+        lang = lang_start if lang_start == lang_end else lang_start
+
+        if diarization_enabled:
+            from src.diarization import run_diarized_transcription
+
+            turns, transcript_en, transcript_original = run_diarized_transcription(
+                wav,
+                pipe,
+                sample_rate=sample_rate,
+                language=lang,
+                max_speakers=diarization_max_speakers,
+                window_sec=diarization_window_sec,
+                hop_sec=diarization_hop_sec,
+                min_segment_sec=diarization_min_segment_sec,
+                distance_threshold=diarization_distance_threshold,
+                max_diarization_sec=diarization_max_sec,
+            )
+            if turns and len({t["speaker"] for t in turns}) >= 2:
+                speakers = sorted({t["speaker"] for t in turns})
+                num_speakers = len(speakers)
+                languages = [lang] if lang_start == lang_end else [lang_start, lang_end]
+                languages = list(dict.fromkeys(languages))
+                language_names = [language_label(code) for code in languages]
+                primary = languages[0] if len(languages) == 1 else "multi"
+                primary_name = (
+                    language_names[0]
+                    if len(language_names) == 1
+                    else ", ".join(language_names)
+                )
+                return TranscriptionResult(
+                    transcript=clean_asr_text(transcript_en),
+                    transcript_original=clean_asr_text(transcript_original),
+                    language=primary,
+                    language_name=primary_name,
+                    languages=languages,
+                    language_names=language_names,
+                    speaker_turns=turns,
+                    num_speakers=num_speakers,
+                )
+            logger.info("Diarization found no separable speakers; using standard ASR")
 
         multi = lang_start != lang_end and max_segments > 1
 
@@ -315,6 +418,8 @@ def transcribe_bilingual(
                 language_name="English",
                 languages=[],
                 language_names=[],
+                speaker_turns=[],
+                num_speakers=0,
             )
 
         languages = list(dict.fromkeys(langs_ordered))
@@ -328,6 +433,18 @@ def transcribe_bilingual(
             primary = "multi"
             primary_name = ", ".join(language_names)
 
+        speaker_turns: list[dict] = []
+        num_speakers = 0
+        if diarization_enabled and transcript_en:
+            from src.diarization.dialogue_splitter import split_dialogue_speakers
+
+            turns, formatted, n = split_dialogue_speakers(transcript_en)
+            if turns and n >= 2:
+                speaker_turns = turns
+                num_speakers = n
+                transcript_en = clean_asr_text(formatted)
+                logger.info("Dialogue split into %d speakers (%d turns)", n, len(turns))
+
         return TranscriptionResult(
             transcript=transcript_en,
             transcript_original=transcript_original,
@@ -335,6 +452,8 @@ def transcribe_bilingual(
             language_name=primary_name,
             languages=languages,
             language_names=language_names,
+            speaker_turns=speaker_turns,
+            num_speakers=num_speakers,
         )
     except Exception as e:
         err = f"[ASR error: {e}]"
@@ -345,6 +464,8 @@ def transcribe_bilingual(
             language_name="English",
             languages=["en"],
             language_names=["English"],
+            speaker_turns=[],
+            num_speakers=0,
         )
 
 

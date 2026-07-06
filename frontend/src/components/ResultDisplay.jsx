@@ -37,7 +37,7 @@ export default function ResultDisplay({ result, error, loading }) {
         <span className="inline-block h-8 w-8 rounded-full border-2 border-violet-400/30 border-t-violet-300 animate-spin mb-3" />
         <p className="text-slate-400 text-sm">Running full analysis…</p>
         <p className="text-slate-500 text-xs mt-2">
-          First request may wait while the server loads models.
+          Long audio can take 3–8 minutes. Keep this tab open.
         </p>
       </div>
     );
@@ -81,6 +81,8 @@ export default function ResultDisplay({ result, error, loading }) {
     language_name,
     languages,
     language_names,
+    speaker_turns,
+    num_speakers,
   } = result;
 
   const langTags =
@@ -101,14 +103,42 @@ export default function ResultDisplay({ result, error, loading }) {
       ? sound_details
       : (sounds || []).map((label) => ({ label, score: null }));
 
+  const turns = speaker_turns || [];
+  const multiSpeaker =
+    turns.length > 0 &&
+    (num_speakers >= 2 || new Set(turns.map((t) => t.speaker)).size >= 2);
+
+  const speakerBlocks = (
+    <div className="space-y-3">
+      {turns.map((t, i) => (
+        <div
+          key={`${t.speaker}-${i}`}
+          className="rounded-lg border border-violet-400/15 bg-violet-950/20 px-3 py-2.5"
+        >
+          <p className="text-xs font-semibold text-violet-200/90 mb-1.5">
+            {t.speaker}
+          </p>
+          <p className="text-slate-100 text-sm leading-relaxed whitespace-pre-wrap break-words">
+            {t.text || "—"}
+          </p>
+        </div>
+      ))}
+    </div>
+  );
+
   const sections = [
     {
       key: "transcript",
-      label: englishOnly ? "Transcript" : "Transcript (English)",
+      label: multiSpeaker
+        ? `Transcript (${num_speakers || new Set(turns.map((t) => t.speaker)).size} speakers)`
+        : englishOnly
+          ? "Transcript"
+          : "Transcript (English)",
       accent: "violet",
+      highlight: multiSpeaker,
       content: (
         <>
-          {!englishOnly && langTags.length > 0 ? (
+          {!englishOnly && !multiSpeaker && langTags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {langTags.map((name) => (
                 <span
@@ -120,10 +150,14 @@ export default function ResultDisplay({ result, error, loading }) {
               ))}
             </div>
           ) : null}
-          <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base break-words">
-            {transcript || "—"}
-          </p>
-          {multiLang && transcript_original ? (
+          {multiSpeaker ? (
+            speakerBlocks
+          ) : (
+            <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base break-words">
+              {transcript || "—"}
+            </p>
+          )}
+          {multiLang && transcript_original && !multiSpeaker ? (
             <div className="mt-3 pt-3 border-t border-white/10">
               <p className="text-xs text-violet-300/70 mb-1">Original (by segment)</p>
               <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
@@ -191,8 +225,8 @@ export default function ResultDisplay({ result, error, loading }) {
         <section
           key={s.key}
           className={`glass-panel-subtle p-4 ${
-            s.highlight ? "sm:col-span-2 border-fuchsia-400/20" : ""
-          }`}
+            s.highlight || s.key === "answer" ? "sm:col-span-2 border-fuchsia-400/20" : ""
+          } ${s.key === "transcript" && s.highlight ? "border-violet-400/20" : ""}`}
         >
           <h3
             className={`section-label mb-2 ${

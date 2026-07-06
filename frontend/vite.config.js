@@ -12,9 +12,9 @@ export default defineConfig(({ mode }) => {
     server: {
       port: 5173,
       proxy: {
-        "/analyze": { target: apiTarget, changeOrigin: true },
-        "/health": { target: apiTarget, changeOrigin: true },
-        "/inference": { target: apiTarget, changeOrigin: true },
+        "/analyze": { target: apiTarget, changeOrigin: true, timeout: 3_600_000 },
+        "/health": { target: apiTarget, changeOrigin: true, timeout: 30_000 },
+        "/inference": { target: apiTarget, changeOrigin: true, timeout: 3_600_000 },
         "/history": { target: apiTarget, changeOrigin: true },
         "/auth": { target: apiTarget, changeOrigin: true },
       },

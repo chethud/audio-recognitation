@@ -73,7 +73,7 @@ export default function UploadAudio({
               {file ? "Replace file" : "Drop audio here or click to browse"}
             </p>
             <p className="text-xs text-slate-500 mt-1">
-              First ~30 seconds are analyzed for transcription
+              Full audio is transcribed (long videos may take a few minutes)
             </p>
           </div>
         </div>

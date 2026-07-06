@@ -21,6 +21,7 @@ export default function Home() {
   const [apiStatus, setApiStatus] = useState("checking");
 
   useEffect(() => {
+    if (loading) return undefined;
     let cancelled = false;
     async function poll() {
       try {
@@ -41,7 +42,7 @@ export default function Home() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [loading]);
 
   async function handleSubmit() {
     if (!file) return;
@@ -49,10 +50,9 @@ export default function Home() {
     setError(null);
     setResult(null);
     const stages = [
-      "Starting server (first visit may take 1–2 min)…",
-      "Loading speech model…",
-      "Detecting languages…",
-      "Scanning sound effects…",
+      "Uploading audio…",
+      "Transcribing speech (long files take a few minutes)…",
+      "Detecting sounds and emotion…",
       "Building answer…",
     ];
     let i = 0;
@@ -63,10 +63,12 @@ export default function Home() {
     }, 4000);
     try {
       const data = await analyzeAudio(file, question, {
+        skipWarmup: apiStatus === "ready",
         onStatus: (s) => {
           if (s === "ready") setApiStatus("ready");
-          else if (s === "loading") setLoadingStage("Loading AI models on server…");
-          else if (s === "waking") setLoadingStage("Waking up API server…");
+          else if (s === "loading") setLoadingStage("Waiting for AI models…");
+          else if (s === "waking") setLoadingStage("Connecting to API…");
+          else if (s === "analyzing") setLoadingStage("Analyzing audio — please wait…");
         },
       });
       setApiStatus("ready");
@@ -76,7 +78,7 @@ export default function Home() {
       let msg =
         d ||
         e?.message ||
-        "Request failed. Is the API running on port 8001?";
+        "Request failed. Is the API running? Try: python run.py --port 8002";
       if (Array.isArray(d)) {
         msg = d.map((x) => x?.msg || JSON.stringify(x)).join(" ");
       } else if (typeof d === "object" && d !== null) {
@@ -110,11 +112,11 @@ export default function Home() {
           </p>
           {apiStatus !== "ready" ? (
             <p className="mt-4 text-sm text-amber-200/90 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 max-w-xl mx-auto lg:mx-0">
-              {apiStatus === "checking" && "Checking API…"}
+              {apiStatus === "checking" && "Connecting to API…"}
               {apiStatus === "waking" &&
-                "API server is waking up — first load can take 1–2 minutes."}
+                "Cannot reach the API. Start the backend: python run.py --port 8002"}
               {apiStatus === "loading" &&
-                "AI models are loading on the server — you can upload now; analysis will start automatically when ready."}
+                "Loading AI models (first start ~1–2 min). You can upload now — analysis waits until ready."}
             </p>
           ) : null}
         </section>

@@ -44,6 +44,8 @@ class AnalyzeResponse(BaseModel):
     question: str = ""
     audio_filename: str = ""
     log_id: Optional[str] = None  # SQLite analyze_logs.id
+    speaker_turns: List[dict] = []
+    num_speakers: int = 0
 
 
 class AnalyzeLogItem(BaseModel):

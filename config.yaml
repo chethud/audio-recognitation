@@ -10,7 +10,7 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 30   # seconds analyzed per upload (set 0 for full file)
+  max_audio_length_sec: 0   # 0 = full file; set e.g. 30 to cap analysis length
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
@@ -21,16 +21,24 @@ alm_lite:
   asr:
     model_id: "openai/whisper-tiny"   # fastest; use whisper-base for better quality
     language: null   # auto-detect
-    segment_sec: 5
-    max_segments: 8   # time windows for full transcript coverage
+    segment_sec: 30
+    max_segments: 1   # 1 = Whisper long-form chunking on full audio
+  diarization:
+    enabled: true   # label speech as Person 1, Person 2, … when multiple speakers
+    max_speakers: 6
+    window_sec: 1.5
+    hop_sec: 1.0     # larger hop = fewer embedding windows (faster)
+    min_segment_sec: 0.5
+    distance_threshold: 0.55
+    max_audio_sec: 300   # diarize first 5 min only; full clip still transcribed
   sed:
     enabled: true
     backend: cnn   # use local CNN (outputs/*.pt); HF AST fails on Python 3.14
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 5
+    top_k: 3
     threshold: 0.08   # lower for quick-trained CNN; top hits still returned
     segment_sec: 3
-    max_windows: 5    # scan more of 30s clips
+    max_windows: 2    # fewer windows = faster sound scan
   emotion:
     enabled: true
     backend: cnn   # lightweight local CNN when checkpoints exist
