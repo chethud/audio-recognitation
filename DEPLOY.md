@@ -11,19 +11,35 @@
 
 ## Backend — Render
 
+### Option A — Docker (recommended)
+
 1. Go to [render.com](https://render.com) → **Sign in with GitHub**
-2. **New +** → **Blueprint** (or **Web Service**)
-3. Connect repo `chethud/audio-recognitation`
-4. If using Blueprint: approve `render.yaml` (Docker, plan: standard)
-5. If manual Web Service:
-   - **Runtime:** Docker
-   - **Dockerfile path:** `./Dockerfile`
-   - **Plan:** Standard (2 GB+)
-   - **Health check path:** `/health`
-6. **Environment variables** (optional):
-   - `HF_TOKEN` — Hugging Face token (faster model downloads)
-7. **Deploy** — first build takes 15–25 min (PyTorch)
-8. After deploy, open Shell and train CNN (once):
+2. **New +** → **Blueprint** → select `chethud/audio-recognitation`
+3. Approve `render.yaml` (Docker, plan: standard)
+4. **Deploy**
+
+### Option B — Manual Web Service
+
+| Setting | Value |
+|---------|--------|
+| **Root Directory** | *(leave empty)* — **NOT** `frontend` |
+| **Runtime** | **Docker** |
+| **Dockerfile path** | `./Dockerfile` |
+| **Plan** | Standard (2 GB+) |
+| **Health check** | `/health` |
+
+**If using Python runtime instead of Docker:**
+
+| Setting | Value |
+|---------|--------|
+| **Root Directory** | *(empty)* |
+| **Python version** | `3.11.9` (env: `PYTHON_VERSION=3.11.9`) |
+| **Build** | `pip install --upgrade pip && pip install -r requirements.txt` |
+| **Start** | `uvicorn backend.main:app --host 0.0.0.0 --port $PORT` |
+
+> **Do not use Python 3.14** — AST/HuggingFace may fail. Use **3.11**.
+
+### After deploy
    ```bash
    python -m training.run_notebook_pipeline --quick --batch-size 2
    ```
@@ -52,6 +68,8 @@
 
 | Issue | Fix |
 |-------|-----|
+| `requirements.txt` not found | Set **Root Directory** to empty (repo root), not `frontend` |
+| Python 3.14 on build | Set `PYTHON_VERSION=3.11.9` or use **Docker** runtime |
 | Render crash / OOM | Upgrade to Standard 2 GB+; use `whisper-tiny` in `config.yaml` |
 | `model_ready: false` | Wait 3–5 min; check logs; ensure RAM enough |
 | No sounds | Run CNN training on Render or upload `outputs/*.pt` |

@@ -1,5 +1,9 @@
 # Render Blueprint — https://render.com/docs/blueprint-spec
 # Deploy: Render Dashboard → New → Blueprint → connect this repo
+#
+# If you use a manual Web Service instead of Blueprint:
+#   Root Directory: (leave EMPTY — not "frontend")
+#   Runtime: Docker (recommended) OR Python 3.11 with commands below
 services:
   - type: web
     name: alm-lite-api
@@ -7,14 +11,15 @@ services:
     plan: standard
     region: oregon
     branch: main
+    rootDir: .
     dockerfilePath: ./Dockerfile
     healthCheckPath: /health
     envVars:
+      - key: PYTHON_VERSION
+        value: "3.11.9"
       - key: PYTHONUNBUFFERED
         value: "1"
       - key: TORCHDYNAMO_DISABLE
         value: "1"
       - key: HF_HOME
         value: /app/.cache/huggingface
-      - key: PORT
-        value: "8000"
