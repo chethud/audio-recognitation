@@ -9,9 +9,10 @@ def _whisper_maps() -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
     """name→iso, iso→name, iso→display label."""
     from transformers.models.whisper.tokenization_whisper import LANGUAGES
 
-    name_to_iso = dict(LANGUAGES)
-    iso_to_name = {iso: name for name, iso in LANGUAGES.items()}
-    labels = {iso: name.replace("_", " ").title() for name, iso in LANGUAGES.items()}
+    # transformers LANGUAGES is ISO code → Whisper language name (e.g. "kn" → "kannada").
+    iso_to_name = dict(LANGUAGES)
+    name_to_iso = {name: iso for iso, name in LANGUAGES.items()}
+    labels = {iso: name.replace("_", " ").title() for iso, name in LANGUAGES.items()}
     labels["en"] = "English"
     return name_to_iso, iso_to_name, labels
 
