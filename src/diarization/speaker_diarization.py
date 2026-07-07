@@ -102,8 +102,6 @@ def _align_transcript_to_speakers(
     *,
     language: str,
 ) -> tuple[list[dict[str, Any]], str, str]:
-    from src.asr.whisper_languages import language_label
-
     if not phrases or not segments:
         return [], "", ""
 
@@ -130,12 +128,7 @@ def _align_transcript_to_speakers(
     orig_lines: list[str] = []
     for t in turns:
         en_lines.append(f"{t['speaker']}: {t['text']}")
-        if language == "en":
-            orig_lines.append(f"{t['speaker']}: {t['text_original']}")
-        else:
-            orig_lines.append(
-                f"{t['speaker']}: [{language_label(language)}] {t['text_original']}"
-            )
+        orig_lines.append(f"{t['speaker']}: {t['text_original']}")
 
     return turns, "\n".join(en_lines), "\n".join(orig_lines)
 
@@ -314,7 +307,7 @@ def run_diarized_transcription(
     pipe,
     *,
     sample_rate: int = 16000,
-    language: str = "en",
+    language: str | None = "en",
     max_speakers: int = 6,
     window_sec: float = 1.2,
     hop_sec: float = 0.6,
@@ -354,9 +347,15 @@ def run_diarized_transcription(
         return [], "", ""
 
     phrases = _run_whisper_timestamped(
-        pipe, wav, sample_rate, language_code=language
+        pipe, wav, sample_rate, language_code=language or None
     )
     if not phrases:
         return [], "", ""
 
-    return _align_transcript_to_speakers(phrases, segments, language=language)
+    from src.asr.text_cleanup import infer_language_from_text
+
+    resolved_lang = language or infer_language_from_text(
+        " ".join(text for text, _ in phrases)
+    ) or "en"
+
+    return _align_transcript_to_speakers(phrases, segments, language=resolved_lang)

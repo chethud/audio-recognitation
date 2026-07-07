@@ -26,6 +26,10 @@ function languageLabel(code) {
   return LANGUAGE_LABELS[code] || code.toUpperCase();
 }
 
+function stripLanguageTag(text) {
+  return (text || "").replace(/^\[[^\]]+\]\s*/, "").trim();
+}
+
 export default function ResultDisplay({ result, error, loading }) {
   if (error) {
     return <div className="glass-error">{error}</div>;
@@ -107,6 +111,18 @@ export default function ResultDisplay({ result, error, loading }) {
   const speakerCount = new Set(turns.map((t) => t.speaker)).size;
   const multiSpeaker = num_speakers >= 2 && speakerCount >= 2 && turns.length > 0;
 
+  const originalText = stripLanguageTag(transcript_original || "");
+  const englishText = (transcript || "").trim();
+  const nonEnglish =
+    !englishOnly && language && language !== "en" && language !== "multi";
+  const showOriginalFirst = nonEnglish && originalText.length > 0;
+  const mainTranscript = showOriginalFirst ? originalText : englishText || originalText;
+  const showEnglishBelow =
+    showOriginalFirst &&
+    englishText &&
+    englishText !== originalText &&
+    !multiSpeaker;
+
   const speakerBlocks = (
     <div className="space-y-3">
       {turns.map((t, i) => (
@@ -129,10 +145,10 @@ export default function ResultDisplay({ result, error, loading }) {
     {
       key: "transcript",
       label: multiSpeaker
-        ? `Transcript (${num_speakers || new Set(turns.map((t) => t.speaker)).size} speakers)`
+        ? `Transcript (${num_speakers || speakerCount} speakers)`
         : englishOnly
           ? "Transcript"
-          : "Transcript (English)",
+          : `Transcript (${detectedLabel})`,
       accent: "violet",
       highlight: multiSpeaker,
       content: (
@@ -153,10 +169,18 @@ export default function ResultDisplay({ result, error, loading }) {
             speakerBlocks
           ) : (
             <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base break-words">
-              {transcript || "—"}
+              {mainTranscript || "—"}
             </p>
           )}
-          {multiLang && transcript_original && !multiSpeaker ? (
+          {showEnglishBelow ? (
+            <div className="mt-3 pt-3 border-t border-white/10">
+              <p className="text-xs text-violet-300/70 mb-1">English translation</p>
+              <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
+                {englishText}
+              </p>
+            </div>
+          ) : null}
+          {multiLang && transcript_original && !multiSpeaker && !showOriginalFirst ? (
             <div className="mt-3 pt-3 border-t border-white/10">
               <p className="text-xs text-violet-300/70 mb-1">Original (by segment)</p>
               <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">

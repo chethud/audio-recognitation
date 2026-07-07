@@ -12,7 +12,13 @@ from src.asr.whisper_languages import (
     whisper_language_code,
     whisper_language_name,
 )
-from src.asr.text_cleanup import clean_asr_text, is_likely_english_text
+from src.asr.text_cleanup import (
+    clean_asr_text,
+    contains_indic_script,
+    infer_language_from_text,
+    is_likely_english_text,
+    INDIC_LANGUAGE_CODES,
+)
 from src.env_setup import configure_ml_env
 
 configure_ml_env()
@@ -123,7 +129,10 @@ def _detect_language(pipe, wav: np.ndarray, sample_rate: int) -> str:
 
         with torch.no_grad():
             lang_ids = model.detect_language(input_features)
-            lang_id = int(lang_ids[0, 0].item())
+            if getattr(lang_ids, "dim", lambda: 0)() == 1:
+                lang_id = int(lang_ids[0].item())
+            else:
+                lang_id = int(lang_ids[0, 0].item())
 
         tokenizer = pipe.tokenizer
         token = tokenizer.convert_ids_to_tokens([lang_id])[0]
@@ -132,7 +141,7 @@ def _detect_language(pipe, wav: np.ndarray, sample_rate: int) -> str:
         return whisper_language_code(code)
     except Exception as exc:
         logger.warning("Language detection failed, falling back to auto: %s", exc)
-        return "en"
+        return ""
 
 
 def _dedupe_whisper_chunks(
@@ -251,26 +260,52 @@ def _run_whisper_timestamped(
 
 
 
+def _normalize_lang_code(language: str | None) -> str:
+    code = (language or "").strip().lower()
+    return code if code and code != "auto" else ""
+
+
 def _transcribe_chunk(
     pipe,
     chunk: np.ndarray,
     sample_rate: int,
     language: str,
-) -> tuple[str, str]:
-    """Transcribe one chunk; translate to English when not English."""
+) -> tuple[str, str, str]:
+    """
+    Transcribe one chunk; translate to English when not English.
+    Returns (english_or_display, original, resolved_language_code).
+    """
+    lang = _normalize_lang_code(language)
+
     original = _run_whisper(
-        pipe, chunk, sample_rate, task="transcribe", language_code=language
+        pipe,
+        chunk,
+        sample_rate,
+        task="transcribe",
+        language_code=lang or None,
     )
     if not original.strip():
-        return "", ""
+        return "", "", lang
 
-    if language == "en":
-        return original.strip(), original.strip()
+    inferred = infer_language_from_text(original)
+    if inferred:
+        lang = inferred
+    elif not lang:
+        lang = "en" if is_likely_english_text(original) else ""
+
+    if not lang or lang == "en":
+        if not lang and not is_likely_english_text(original):
+            # Last resort: let Whisper auto-translate without forcing English.
+            english = _run_whisper(
+                pipe, chunk, sample_rate, task="translate", language_code=None
+            )
+            return (english or original).strip(), original.strip(), lang or "en"
+        return original.strip(), original.strip(), "en"
 
     english = _run_whisper(
-        pipe, chunk, sample_rate, task="translate", language_code=language
+        pipe, chunk, sample_rate, task="translate", language_code=lang
     )
-    return (english or original).strip(), original.strip()
+    return (english or original).strip(), original.strip(), lang
 
 
 def _finalize_transcripts(en_parts: list[str], orig_parts: list[str]) -> tuple[str, str]:
@@ -350,19 +385,23 @@ def transcribe_bilingual(
         lang_start, lang_end = _probe_languages(pipe, wav, sample_rate)
         duration_s = len(wav) / max(sample_rate, 1)
 
-        # Skip full-clip English verification on long audio (extra Whisper pass).
+        # Re-check English only for Latin-script detections (never for Kannada/Hindi/etc.).
         if (
             lang_start == lang_end
+            and lang_start
+            and lang_start not in INDIC_LANGUAGE_CODES
             and lang_start != "en"
             and duration_s < 90
         ):
             auto_en = _run_whisper(
                 pipe, wav, sample_rate, task="transcribe", language_code=None
             )
-            if is_likely_english_text(auto_en):
+            if is_likely_english_text(auto_en) and not contains_indic_script(auto_en):
                 lang_start = lang_end = "en"
 
         lang = lang_start if lang_start == lang_end else lang_start
+        if not lang and lang_start != lang_end:
+            lang = lang_start or lang_end
 
         if diarization_enabled:
             from src.diarization import run_diarized_transcription
@@ -371,7 +410,7 @@ def transcribe_bilingual(
                 wav,
                 pipe,
                 sample_rate=sample_rate,
-                language=lang,
+                language=lang or None,
                 max_speakers=diarization_max_speakers,
                 window_sec=diarization_window_sec,
                 hop_sec=diarization_hop_sec,
@@ -451,21 +490,33 @@ def transcribe_bilingual(
                 )
 
         for lang, chunk in chunks:
-            english, original = _transcribe_chunk(pipe, chunk, sample_rate, lang)
+            english, original, resolved_lang = _transcribe_chunk(
+                pipe, chunk, sample_rate, lang
+            )
             if not original:
                 continue
 
-            # English mis-detected as another language — keep speech in English.
-            if lang != "en" and is_likely_english_text(original):
+            if resolved_lang:
+                lang = resolved_lang
+            else:
+                inferred = infer_language_from_text(original)
+                if inferred:
+                    lang = inferred
+
+            if (
+                lang != "en"
+                and is_likely_english_text(original)
+                and not contains_indic_script(original)
+            ):
                 lang = "en"
                 english = original
 
-            langs_ordered.append(lang)
+            langs_ordered.append(lang or "en")
             if lang == "en":
                 orig_parts.append(original)
                 en_parts.append(original)
             else:
-                orig_parts.append(f"[{language_label(lang)}] {original}")
+                orig_parts.append(original)
                 en_parts.append(english)
 
         if not en_parts:

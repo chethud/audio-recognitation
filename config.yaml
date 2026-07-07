@@ -19,7 +19,7 @@ alm_lite:
   fast_mode: true   # ASR-only locally — full stack needs more RAM/page file
   store_uploaded_audio: false
   asr:
-    model_id: "openai/whisper-tiny"   # fastest; use whisper-base for better quality
+    model_id: "openai/whisper-base"   # much better for Kannada/Indic; use tiny only for speed tests
     language: null   # auto-detect
     segment_sec: 30
     max_segments: 1   # 1 = Whisper long-form chunking on full audio

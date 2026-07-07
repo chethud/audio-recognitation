@@ -7,6 +7,44 @@ import re
 _UNICODE_WORD = r"[\w\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]+"
 _SENTENCE_END = r"[.!?।॥]\s*"
 
+_SCRIPT_RANGES: list[tuple[str, str]] = [
+    ("kn", r"[\u0C80-\u0CFF]"),  # Kannada
+    ("te", r"[\u0C01-\u0C7F]"),  # Telugu
+    ("ta", r"[\u0B80-\u0BFF]"),  # Tamil
+    ("ml", r"[\u0D00-\u0D7F]"),  # Malayalam
+    ("hi", r"[\u0900-\u097F]"),  # Hindi / Devanagari
+    ("bn", r"[\u0980-\u09FF]"),  # Bengali
+    ("gu", r"[\u0A80-\u0AFF]"),  # Gujarati
+    ("pa", r"[\u0A00-\u0A7F]"),  # Gurmukhi
+    ("or", r"[\u0B00-\u0B7F]"),  # Odia
+]
+
+INDIC_LANGUAGE_CODES = frozenset(code for code, _ in _SCRIPT_RANGES)
+
+
+def strip_language_tag_prefix(text: str) -> str:
+    """Remove leading '[Kannada] ' style tag from stored originals."""
+    return re.sub(r"^\[[^\]]+\]\s*", "", (text or "").strip()).strip()
+
+
+def infer_language_from_text(text: str) -> str | None:
+    """Guess ISO code from Unicode script in transcript."""
+    t = text or ""
+    best_code: str | None = None
+    best_count = 0
+    for code, pattern in _SCRIPT_RANGES:
+        count = len(re.findall(pattern, t))
+        if count > best_count:
+            best_count = count
+            best_code = code
+    if best_count >= 2:
+        return best_code
+    return None
+
+
+def contains_indic_script(text: str) -> bool:
+    return infer_language_from_text(text) is not None
+
 
 def _normalize_phrase(text: str) -> str:
     return re.sub(r"\s+", " ", (text or "").strip())
