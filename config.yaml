@@ -20,7 +20,8 @@ alm_lite:
   store_uploaded_audio: false
   asr:
     model_id: "openai/whisper-base"   # much better for Kannada/Indic; use tiny only for speed tests
-    language: null   # auto-detect
+    language: null   # auto-detect; supported: en, kn, hi, ta, te, ml
+    preferred_languages: [en, kn, hi, ta, te, ml]
     segment_sec: 30
     max_segments: 1   # 1 = Whisper long-form chunking on full audio
   diarization:

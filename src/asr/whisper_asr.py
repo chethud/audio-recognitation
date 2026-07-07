@@ -18,6 +18,7 @@ from src.asr.text_cleanup import (
     infer_language_from_text,
     is_likely_english_text,
     INDIC_LANGUAGE_CODES,
+    PRIMARY_LANGUAGE_CODES,
 )
 from src.env_setup import configure_ml_env
 
@@ -341,17 +342,83 @@ def _split_time_chunks(
     return chunks or [wav]
 
 
+def _majority_language_vote(
+    votes: list[str],
+    preferred: frozenset[str] | None = None,
+) -> str:
+    from collections import Counter
+
+    pool = [v for v in votes if v]
+    if not pool:
+        return ""
+    preferred = preferred or PRIMARY_LANGUAGE_CODES
+    filtered = [v for v in pool if v in preferred]
+    return Counter(filtered or pool).most_common(1)[0][0]
+
+
+def _resolve_spoken_language(
+    pipe,
+    wav: np.ndarray,
+    sample_rate: int,
+    *,
+    preferred: frozenset[str] | None = None,
+) -> str:
+    """
+    Robust language pick for English + Kannada/Hindi/Tamil/Telugu/Malayalam.
+    Script from a short auto-transcribe overrides unreliable Whisper votes.
+    """
+    preferred = preferred or PRIMARY_LANGUAGE_CODES
+    n = len(wav)
+    votes: list[str] = []
+
+    if n <= sample_rate * 3:
+        votes.append(_detect_language(pipe, wav, sample_rate))
+    else:
+        win = sample_rate * 8
+        for frac in (0.15, 0.35, 0.5, 0.65, 0.85):
+            center = int(frac * n)
+            start = max(0, center - win // 2)
+            end = min(n, start + win)
+            chunk = wav[start:end]
+            if len(chunk) >= sample_rate * 2:
+                code = _detect_language(pipe, chunk, sample_rate)
+                if code:
+                    votes.append(whisper_language_code(code))
+
+    whisper_guess = _majority_language_vote(votes, preferred)
+
+    sample_len = min(n, sample_rate * 25)
+    mid = n // 2
+    probe = wav[max(0, mid - sample_len // 2) : max(0, mid - sample_len // 2) + sample_len]
+    if len(probe) < sample_rate * 2:
+        probe = wav[: min(n, sample_rate * 20)]
+
+    auto_text = _run_whisper(
+        pipe, probe, sample_rate, task="transcribe", language_code=None
+    )
+    script_lang = infer_language_from_text(auto_text)
+    if script_lang:
+        if whisper_guess and script_lang != whisper_guess:
+            logger.info(
+                "Language script=%s overrides Whisper=%s",
+                language_label(script_lang),
+                language_label(whisper_guess),
+            )
+        return script_lang
+
+    if is_likely_english_text(auto_text) and not contains_indic_script(auto_text):
+        return "en"
+
+    return whisper_guess
+
+
 def _probe_languages(
     pipe, wav: np.ndarray, sample_rate: int, probe_sec: float = 2.0
 ) -> tuple[str, str]:
-    """Compare language at start vs end (2 lightweight detect passes)."""
-    probe = min(int(probe_sec * sample_rate), max(len(wav) // 3, sample_rate))
-    if len(wav) <= probe:
-        lang = _detect_language(pipe, wav, sample_rate)
-        return lang, lang
-    lang_start = _detect_language(pipe, wav[:probe], sample_rate)
-    lang_end = _detect_language(pipe, wav[-probe:], sample_rate)
-    return lang_start, lang_end
+    """Return (lang, lang) using multi-point detection + script verification."""
+    del probe_sec  # kept for API compatibility
+    lang = _resolve_spoken_language(pipe, wav, sample_rate)
+    return lang, lang
 
 
 def transcribe_bilingual(
@@ -384,24 +451,20 @@ def transcribe_bilingual(
     try:
         lang_start, lang_end = _probe_languages(pipe, wav, sample_rate)
         duration_s = len(wav) / max(sample_rate, 1)
+        lang = lang_start
 
-        # Re-check English only for Latin-script detections (never for Kannada/Hindi/etc.).
+        # Re-check English only when Whisper still thinks non-English Latin language.
         if (
-            lang_start == lang_end
-            and lang_start
-            and lang_start not in INDIC_LANGUAGE_CODES
-            and lang_start != "en"
+            lang
+            and lang not in INDIC_LANGUAGE_CODES
+            and lang != "en"
             and duration_s < 90
         ):
             auto_en = _run_whisper(
                 pipe, wav, sample_rate, task="transcribe", language_code=None
             )
             if is_likely_english_text(auto_en) and not contains_indic_script(auto_en):
-                lang_start = lang_end = "en"
-
-        lang = lang_start if lang_start == lang_end else lang_start
-        if not lang and lang_start != lang_end:
-            lang = lang_start or lang_end
+                lang_start = lang_end = lang = "en"
 
         if diarization_enabled:
             from src.diarization import run_diarized_transcription
@@ -468,7 +531,7 @@ def transcribe_bilingual(
                 )
             logger.info("Diarization found no separable speakers; using standard ASR")
 
-        multi = lang_start != lang_end and max_segments > 1
+        multi = False  # avoid false Hindi+Telugu splits from noisy 2s probes
 
         en_parts: list[str] = []
         orig_parts: list[str] = []

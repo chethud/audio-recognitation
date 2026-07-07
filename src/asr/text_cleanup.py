@@ -21,6 +21,9 @@ _SCRIPT_RANGES: list[tuple[str, str]] = [
 
 INDIC_LANGUAGE_CODES = frozenset(code for code, _ in _SCRIPT_RANGES)
 
+# User-facing primary languages (English + major South Indian languages).
+PRIMARY_LANGUAGE_CODES = frozenset({"en", "kn", "hi", "ta", "te", "ml"})
+
 
 def strip_language_tag_prefix(text: str) -> str:
     """Remove leading '[Kannada] ' style tag from stored originals."""
@@ -37,6 +40,8 @@ def infer_language_from_text(text: str) -> str | None:
         if count > best_count:
             best_count = count
             best_code = code
+    if best_count >= 1 and len(t.strip()) <= 24:
+        return best_code
     if best_count >= 2:
         return best_code
     return None

@@ -24,7 +24,9 @@ def whisper_language_name(code_or_name: str | None) -> str | None:
     name_to_iso, iso_to_name, _ = _whisper_maps()
     if key in name_to_iso:
         return key
-    return iso_to_name.get(key)
+    if key in iso_to_name:
+        return iso_to_name[key]
+    return None
 
 
 def whisper_language_code(code_or_name: str | None) -> str:
@@ -33,10 +35,10 @@ def whisper_language_code(code_or_name: str | None) -> str:
         return "en"
     key = code_or_name.strip().lower()
     name_to_iso, iso_to_name, _ = _whisper_maps()
-    if key in iso_to_name:
-        return iso_to_name[key]
     if key in name_to_iso:
         return name_to_iso[key]
+    if key in iso_to_name:
+        return key
     return key
 
 
