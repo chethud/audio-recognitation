@@ -30,15 +30,16 @@ alm_lite:
     hop_sec: 1.0     # larger hop = fewer embedding windows (faster)
     min_segment_sec: 0.5
     distance_threshold: 0.55
-    max_audio_sec: 300   # diarize first 5 min only; full clip still transcribed
+    max_audio_sec: 0   # 0 = diarize full clip; set e.g. 300 to cap for speed
   sed:
     enabled: true
-    backend: cnn   # use local CNN (outputs/*.pt); HF AST fails on Python 3.14
+    backend: hybrid   # cnn + AST AudioSet (dog bark, phone ring, car horn, …)
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 3
-    threshold: 0.08   # lower for quick-trained CNN; top hits still returned
-    segment_sec: 3
-    max_windows: 2    # fewer windows = faster sound scan
+    top_k: 10
+    threshold: 0.04   # lower = more background sounds detected
+    segment_sec: 2.5
+    max_windows: 12    # evenly spaced windows across full clip; 0 = auto
+    max_results: 12
   emotion:
     enabled: true
     backend: cnn   # lightweight local CNN when checkpoints exist

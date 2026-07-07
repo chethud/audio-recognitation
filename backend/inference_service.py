@@ -43,9 +43,23 @@ def _sed_uses_cnn(cfg: dict[str, Any]) -> bool:
     backend = str(sed_cfg.get("backend", "auto")).lower()
     if backend in ("hf", "ast", "huggingface"):
         return False
-    if backend == "cnn":
+    if backend in ("cnn", "hybrid", "both"):
         return should_use_cnn(cfg)
     return should_use_cnn(cfg)
+
+
+def _needs_ast_sed(cfg: dict[str, Any]) -> bool:
+    sed_cfg = _alm_cfg(cfg).get("sed", {})
+    if not sed_cfg.get("enabled", True):
+        return False
+    backend = str(sed_cfg.get("backend", "auto")).lower()
+    if backend == "cnn":
+        return False
+    if backend in ("hybrid", "both", "ast", "hf", "huggingface"):
+        return True
+    from src.cnn.loader import should_use_cnn
+
+    return not should_use_cnn(cfg)
 
 
 def _emotion_uses_cnn(cfg: dict[str, Any]) -> bool:
@@ -98,9 +112,9 @@ def warmup() -> None:
 
         if fast:
             if cnn_ready and cnn_sed and cnn_emo:
-                mode = "fast (ASR + CNN SED + CNN emotion)"
+                mode = "fast (ASR + hybrid SED + CNN emotion)"
             elif cnn_ready and cnn_sed:
-                mode = "fast (ASR + CNN SED)"
+                mode = "fast (ASR + hybrid SED)"
             elif skip_hf_sed or not sed_cfg.get("enabled", True):
                 mode = "fast (ASR only)"
             else:
@@ -111,11 +125,7 @@ def warmup() -> None:
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if (
-            sed_cfg.get("enabled", True)
-            and not (cnn_ready and cnn_sed)
-            and not skip_hf_sed
-        ):
+        if _needs_ast_sed(cfg) and not skip_hf_sed:
             try:
                 from src.sed.sed_module import _get_sed_pipe
 
@@ -194,10 +204,11 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 sed_model_id=sed_cfg.get(
                     "model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"
                 ),
-                sed_top_k=sed_cfg.get("top_k", 5),
-                sed_threshold=sed_cfg.get("threshold", 0.15),
-                sed_segment_sec=sed_cfg.get("segment_sec", 3.0),
-                sed_max_windows=sed_cfg.get("max_windows", 2),
+                sed_top_k=sed_cfg.get("top_k", 10),
+                sed_threshold=sed_cfg.get("threshold", 0.04),
+                sed_segment_sec=sed_cfg.get("segment_sec", 2.5),
+                sed_max_windows=sed_cfg.get("max_windows", 12),
+                sed_max_results=sed_cfg.get("max_results", 12),
                 asr_segment_sec=asr_cfg.get("segment_sec", 4.0),
                 asr_max_segments=asr_cfg.get("max_segments", 2),
                 diarization_enabled=bool(dia_cfg.get("enabled", False)),

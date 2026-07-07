@@ -17,7 +17,6 @@ _INTERJECTION = re.compile(
     r"\s+(?=(?:Oh|Yeah|Hmm|OK|Okay|Yes|No|Mom|Dear)\b)",
     re.I,
 )
-# Titles like "Mrs." must not end a sentence during splitting.
 _ABBREV_PERIOD = re.compile(
     r"\b(Mrs|Mr|Ms|Dr|Prof|Sr|Jr|vs|etc|i\.e|e\.g)\.",
     re.I,
@@ -57,11 +56,19 @@ def _split_sentences(text: str) -> list[str]:
     return out
 
 
+def _has_strong_dialogue_cues(text: str) -> bool:
+    """True only for scripted two-person dialogue (neighbor lesson pattern)."""
+    roy = bool(_ADDR_ROY.search(text))
+    gupta = bool(_ADDR_GUPTA.search(text))
+    return roy and gupta
+
+
 def _guess_speaker(
     sentence: str,
     *,
     last: str | None,
     in_dialogue: bool,
+    dialogue_active: bool,
 ) -> str:
     if not in_dialogue:
         return "Person 1"
@@ -75,17 +82,15 @@ def _guess_speaker(
     if _ADDR_GUPTA.search(sentence) and not _ADDR_ROY.search(sentence):
         return "Person 2"
 
-    if (
-        in_dialogue
-        and last
-        and _SHORT_FOLLOWUP.match(sentence.strip())
-    ):
+    if dialogue_active and last and _SHORT_FOLLOWUP.match(sentence.strip()):
         return last
 
-    if last == "Person 1":
-        return "Person 2"
-    if last == "Person 2":
-        return "Person 1"
+    if dialogue_active and last:
+        if last == "Person 1":
+            return "Person 2"
+        if last == "Person 2":
+            return "Person 1"
+
     return "Person 1"
 
 
@@ -101,9 +106,12 @@ def _merge_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def split_dialogue_speakers(transcript: str) -> tuple[list[dict[str, Any]], str, int]:
     """
-    Split a monologue-style transcript into Person 1 / Person 2 turns.
-    Uses dialogue cues + alternation (works when one actor plays both roles).
+    Split into Person 1 / Person 2 only for clear two-character scripted dialogue.
+    Single-speaker monologue returns no speaker turns (plain transcript).
     """
+    if not _has_strong_dialogue_cues(transcript):
+        return [], transcript, 0
+
     sentences = _split_sentences(transcript)
     if len(sentences) < 2:
         return [], transcript, 0
@@ -119,10 +127,24 @@ def split_dialogue_speakers(transcript: str) -> tuple[list[dict[str, Any]], str,
 
     turns: list[dict[str, Any]] = []
     last: str | None = None
+    dialogue_active = False
 
     for i, sent in enumerate(sentences):
         in_dialogue = i >= dialogue_idx
-        speaker = _guess_speaker(sent, last=last, in_dialogue=in_dialogue)
+        if in_dialogue and (
+            _ADDR_ROY.search(sent)
+            or _ADDR_GUPTA.search(sent)
+            or _SELF_ROY.search(sent)
+            or _SELF_GUPTA.search(sent)
+        ):
+            dialogue_active = True
+
+        speaker = _guess_speaker(
+            sent,
+            last=last,
+            in_dialogue=in_dialogue,
+            dialogue_active=dialogue_active,
+        )
         last = speaker
         turns.append(
             {
@@ -136,42 +158,6 @@ def split_dialogue_speakers(transcript: str) -> tuple[list[dict[str, Any]], str,
 
     turns = _merge_turns(turns)
     speakers = {t["speaker"] for t in turns}
-
-    # Force alternation in dialogue if only one label was used
-    if len(speakers) < 2 and len(sentences) - dialogue_idx >= 3:
-        turns = []
-        last = None
-        for i, sent in enumerate(sentences):
-            if i < dialogue_idx:
-                turns.append(
-                    {
-                        "speaker": "Person 1",
-                        "text": sent,
-                        "text_original": sent,
-                        "start_sec": None,
-                        "end_sec": None,
-                    }
-                )
-                continue
-            speaker = "Person 1" if last != "Person 1" or last is None else "Person 2"
-            if last is None:
-                speaker = "Person 1"
-            elif last == "Person 1":
-                speaker = "Person 2"
-            else:
-                speaker = "Person 1"
-            last = speaker
-            turns.append(
-                {
-                    "speaker": speaker,
-                    "text": sent,
-                    "text_original": sent,
-                    "start_sec": None,
-                    "end_sec": None,
-                }
-            )
-        turns = _merge_turns(turns)
-        speakers = {t["speaker"] for t in turns}
 
     if len(speakers) < 2:
         return [], transcript, 0

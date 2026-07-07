@@ -135,6 +135,35 @@ def _detect_language(pipe, wav: np.ndarray, sample_rate: int) -> str:
         return "en"
 
 
+def _dedupe_whisper_chunks(
+    parsed: list[tuple[str, tuple[float, float]]],
+) -> list[tuple[str, tuple[float, float]]]:
+    """Drop overlapping Whisper chunks that repeat the same line (common on Indic audio)."""
+    import re
+
+    if not parsed:
+        return parsed
+
+    out: list[tuple[str, tuple[float, float]]] = []
+    for text, (start, end) in parsed:
+        key = re.sub(r"\s+", " ", (text or "").strip())
+        if not key:
+            continue
+        if out:
+            prev_text, (prev_start, prev_end) = out[-1]
+            prev_key = re.sub(r"\s+", " ", prev_text.strip())
+            if key == prev_key:
+                out[-1] = (prev_text, (prev_start, max(prev_end, end)))
+                continue
+            if prev_key and key in prev_key and end <= prev_end + 0.5:
+                continue
+            if prev_key and prev_key in key and start <= prev_end + 0.5:
+                out[-1] = (text, (prev_start, max(prev_end, end)))
+                continue
+        out.append((text, (start, end)))
+    return out
+
+
 def _run_whisper(
     pipe,
     wav: np.ndarray,
@@ -146,12 +175,14 @@ def _run_whisper(
     duration_s = len(wav) / max(sample_rate, 1)
     pipe_kwargs: dict = {}
     if duration_s > 30:
-        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 6}
+        # Wider stride reduces duplicate lines from overlapping chunks (Kannada/Hindi).
+        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 12}
 
     gen_kwargs: dict = {
         "task": task,
         "condition_on_prev_tokens": False,
         "num_beams": 1,
+        "no_repeat_ngram_size": 3,
     }
     # Do not pass no_speech_threshold / logprob_threshold here — on short clips
     # transformers can compare None to float and crash transcription.
@@ -168,7 +199,7 @@ def _run_whisper(
         **pipe_kwargs,
     )
     text = out.get("text", "") if isinstance(out, dict) else str(out)
-    return (text or "").strip()
+    return clean_asr_text((text or "").strip())
 
 
 def _run_whisper_timestamped(
@@ -182,12 +213,13 @@ def _run_whisper_timestamped(
     duration_s = len(wav) / max(sample_rate, 1)
     pipe_kwargs: dict = {}
     if duration_s > 30:
-        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 6}
+        pipe_kwargs = {"chunk_length_s": 30, "batch_size": 8, "stride_length_s": 12}
 
     gen_kwargs: dict = {
         "task": "transcribe",
         "condition_on_prev_tokens": False,
         "num_beams": 1,
+        "no_repeat_ngram_size": 3,
     }
     whisper_lang = whisper_language_name(language_code)
     if whisper_lang and whisper_lang != "english":
@@ -215,7 +247,7 @@ def _run_whisper_timestamped(
         if not text or not ts or ts[0] is None or ts[1] is None:
             continue
         parsed.append((text, (float(ts[0]), float(ts[1]))))
-    return parsed
+    return _dedupe_whisper_chunks(parsed)
 
 
 
@@ -347,9 +379,12 @@ def transcribe_bilingual(
                 distance_threshold=diarization_distance_threshold,
                 max_diarization_sec=diarization_max_sec,
             )
-            if turns and len({t["speaker"] for t in turns}) >= 2:
-                speakers = sorted({t["speaker"] for t in turns})
-                num_speakers = len(speakers)
+            from src.diarization.speaker_utils import normalize_speaker_turns
+
+            turns, transcript_en, transcript_original, num_speakers = (
+                normalize_speaker_turns(turns, transcript_en, transcript_original)
+            )
+            if turns and num_speakers >= 2:
                 languages = [lang] if lang_start == lang_end else [lang_start, lang_end]
                 languages = list(dict.fromkeys(languages))
                 language_names = [language_label(code) for code in languages]
@@ -368,6 +403,29 @@ def transcribe_bilingual(
                     language_names=language_names,
                     speaker_turns=turns,
                     num_speakers=num_speakers,
+                )
+            if transcript_en:
+                logger.info(
+                    "Diarization collapsed to single speaker; using plain transcript"
+                )
+                languages = [lang] if lang_start == lang_end else [lang_start, lang_end]
+                languages = list(dict.fromkeys(languages))
+                language_names = [language_label(code) for code in languages]
+                primary = languages[0] if len(languages) == 1 else "multi"
+                primary_name = (
+                    language_names[0]
+                    if len(language_names) == 1
+                    else ", ".join(language_names)
+                )
+                return TranscriptionResult(
+                    transcript=clean_asr_text(transcript_en),
+                    transcript_original=clean_asr_text(transcript_original),
+                    language=primary,
+                    language_name=primary_name,
+                    languages=languages,
+                    language_names=language_names,
+                    speaker_turns=[],
+                    num_speakers=0,
                 )
             logger.info("Diarization found no separable speakers; using standard ASR")
 
@@ -435,15 +493,26 @@ def transcribe_bilingual(
 
         speaker_turns: list[dict] = []
         num_speakers = 0
-        if diarization_enabled and transcript_en:
+        if diarization_enabled and transcript_en and primary == "en":
             from src.diarization.dialogue_splitter import split_dialogue_speakers
+            from src.diarization.speaker_utils import normalize_speaker_turns
 
             turns, formatted, n = split_dialogue_speakers(transcript_en)
-            if turns and n >= 2:
+            turns, transcript_en, transcript_original, num_speakers = (
+                normalize_speaker_turns(
+                    turns,
+                    formatted if n >= 2 else transcript_en,
+                    transcript_original,
+                )
+            )
+            if turns and num_speakers >= 2:
                 speaker_turns = turns
-                num_speakers = n
-                transcript_en = clean_asr_text(formatted)
-                logger.info("Dialogue split into %d speakers (%d turns)", n, len(turns))
+                transcript_en = clean_asr_text(transcript_en)
+                logger.info(
+                    "Dialogue split into %d speakers (%d turns)",
+                    num_speakers,
+                    len(turns),
+                )
 
         return TranscriptionResult(
             transcript=transcript_en,

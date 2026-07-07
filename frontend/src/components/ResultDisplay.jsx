@@ -104,9 +104,8 @@ export default function ResultDisplay({ result, error, loading }) {
       : (sounds || []).map((label) => ({ label, score: null }));
 
   const turns = speaker_turns || [];
-  const multiSpeaker =
-    turns.length > 0 &&
-    (num_speakers >= 2 || new Set(turns.map((t) => t.speaker)).size >= 2);
+  const speakerCount = new Set(turns.map((t) => t.speaker)).size;
+  const multiSpeaker = num_speakers >= 2 && speakerCount >= 2 && turns.length > 0;
 
   const speakerBlocks = (
     <div className="space-y-3">

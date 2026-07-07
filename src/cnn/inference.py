@@ -7,6 +7,7 @@ import numpy as np
 import torch
 
 from src.cnn.loader import _load_emo_bundle, _load_sed_bundle, should_use_cnn
+from src.sed.windows import sliding_audio_windows
 from training.data_utils import normalize_mel, pad_or_crop_time, waveform_to_mel
 
 
@@ -60,19 +61,12 @@ def _sed_time_windows(
     segment_sec: float,
     max_windows: int,
 ) -> list[np.ndarray]:
-    seg_samples = max(int(segment_sec * sample_rate), sample_rate)
-    if len(wav) <= seg_samples or max_windows <= 1:
-        return [wav]
-
-    windows: list[np.ndarray] = [wav]
-    step = max(seg_samples // 2, sample_rate)
-    start = step
-    while start < len(wav) - sample_rate // 4 and len(windows) < max_windows:
-        chunk = wav[start : start + seg_samples]
-        if len(chunk) >= sample_rate // 2:
-            windows.append(chunk)
-        start += step
-    return windows
+    return sliding_audio_windows(
+        wav,
+        sample_rate,
+        segment_sec=segment_sec,
+        max_windows=max_windows,
+    )
 
 
 def predict_sed_cnn(
@@ -107,7 +101,10 @@ def predict_sed_cnn(
             best[item["label"]] = max(best.get(item["label"], 0.0), item["score"])
 
     ranked = sorted(best.items(), key=lambda x: x[1], reverse=True)
-    return [{"label": label, "score": round(score, 4)} for label, score in ranked]
+    return [
+        {"label": label, "score": round(score, 4)}
+        for label, score in ranked[: max(top_k * 2, top_k)]
+    ]
 
 
 def predict_emotion_cnn(

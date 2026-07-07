@@ -3,6 +3,96 @@ from __future__ import annotations
 
 import re
 
+# Letters from major Indic scripts + Latin (for Kannada, Hindi, Tamil, …).
+_UNICODE_WORD = r"[\w\u0900-\u097F\u0980-\u09FF\u0A00-\u0A7F\u0A80-\u0AFF\u0B00-\u0B7F\u0B80-\u0BFF\u0C00-\u0C7F\u0C80-\u0CFF\u0D00-\u0D7F]+"
+_SENTENCE_END = r"[.!?।॥]\s*"
+
+
+def _normalize_phrase(text: str) -> str:
+    return re.sub(r"\s+", " ", (text or "").strip())
+
+
+def collapse_repeated_phrases(text: str) -> str:
+    """
+    Remove Whisper stutter loops — same line or sentence repeated many times.
+    Works for Kannada and other non-Latin scripts.
+    """
+    cleaned = _normalize_phrase(text)
+    if not cleaned:
+        return cleaned
+
+    # Entire string is one short phrase copied N times in a row.
+    cleaned = _collapse_whole_string_loops(cleaned)
+
+    # Drop consecutive duplicate sentences/clauses.
+    parts = re.split(f"({_SENTENCE_END})", cleaned)
+    rebuilt: list[str] = []
+    prev_key: str | None = None
+    buf = ""
+    for part in parts:
+        buf += part
+        if re.search(_SENTENCE_END + r"$", buf):
+            sentence = buf.strip()
+            key = _normalize_phrase(sentence)
+            if key and key != prev_key:
+                rebuilt.append(sentence)
+                prev_key = key
+            buf = ""
+    if buf.strip():
+        tail = buf.strip()
+        key = _normalize_phrase(tail)
+        if key != prev_key:
+            rebuilt.append(tail)
+
+    if rebuilt:
+        cleaned = " ".join(rebuilt)
+    else:
+        cleaned = _normalize_phrase(cleaned)
+
+    # Repeated single words (any script): word word word word
+    cleaned = re.sub(
+        rf"({_UNICODE_WORD})(?:\s+\1){{3,}}",
+        r"\1",
+        cleaned,
+        flags=re.UNICODE,
+    )
+
+    # Repeated multi-word phrase in a row (4+ chars, 2+ repeats).
+    cleaned = re.sub(
+        r"(.{4,120}?)(?:\s*\1){2,}",
+        r"\1",
+        cleaned,
+        flags=re.DOTALL,
+    )
+
+    return _normalize_phrase(cleaned)
+
+
+def _collapse_whole_string_loops(text: str, *, min_unit: int = 6) -> str:
+    """If text == unit * N, return unit once."""
+    t = text.strip()
+    n = len(t)
+    if n < min_unit * 2:
+        return t
+
+    for size in range(min(n // 2, 240), min_unit - 1, -1):
+        unit = t[:size]
+        if len(unit.strip()) < min_unit:
+            continue
+        if n % size == 0 and t == unit * (n // size):
+            return unit.strip()
+
+        reps = 0
+        pos = 0
+        while pos + size <= n and t[pos : pos + size].strip() == unit.strip():
+            reps += 1
+            pos += size
+        if reps >= 3:
+            remainder = t[pos:].strip()
+            return f"{unit.strip()} {remainder}".strip() if remainder else unit.strip()
+
+    return t
+
 
 def clean_asr_text(text: str) -> str:
     """Remove repetitive hallucination tokens and normalize whitespace."""
@@ -22,9 +112,9 @@ def clean_asr_text(text: str) -> str:
         r"[vocalization]",
         cleaned,
     )
-    # Collapse repeated words (the the the)
+    # Collapse repeated Latin words (the the the)
     cleaned = re.sub(r"\b(\w+)(?:\s+\1){3,}\b", r"\1", cleaned, flags=re.IGNORECASE)
-    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    cleaned = collapse_repeated_phrases(cleaned)
     return cleaned
 
 
@@ -36,7 +126,9 @@ def is_meaningful_speech(text: str) -> bool:
     without_markers = t.replace("[vocalization]", "").strip()
     if len(without_markers) < 3:
         return False
-    return bool(re.search(r"[A-Za-z]{2,}", without_markers))
+    if re.search(r"[A-Za-z\u0900-\u0D7F]{2,}", without_markers):
+        return True
+    return len(without_markers) >= 4
 
 
 def is_likely_english_text(text: str) -> bool:

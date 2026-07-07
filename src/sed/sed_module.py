@@ -1,15 +1,16 @@
-"""Environmental sound events via AST (audio-classification pipeline)."""
+"""Environmental sound events via CNN (ESC-50) and/or AST (AudioSet)."""
 from __future__ import annotations
 
+import logging
 import threading
 from typing import List, Optional, Union
 
 import numpy as np
 import torch
 
-import logging
-
 from src.env_setup import configure_ml_env
+from src.sed.labels import merge_sound_events, should_skip_sound_label
+from src.sed.windows import sliding_audio_windows
 
 configure_ml_env()
 
@@ -20,16 +21,28 @@ _pipe_cache: dict[str, object] = {}
 _hf_sed_unavailable = False
 
 
-def _hf_fallback_allowed(backend: str) -> bool:
-    """Use HuggingFace AST only when explicitly requested and CNN is not in use."""
+def _backend_uses_cnn(backend: str) -> bool:
+    from src.cnn.loader import should_use_cnn
+
+    b = backend.lower()
+    if b in ("cnn", "hybrid", "both"):
+        return True
+    if b in ("hf", "ast", "huggingface"):
+        return False
+    return should_use_cnn()
+
+
+def _backend_uses_ast(backend: str) -> bool:
     from src.cnn.loader import cnn_checkpoints_exist
 
     b = backend.lower()
-    if b == "cnn":
-        return False
     if b in ("hf", "ast", "huggingface"):
         return True
-    # auto: prefer CNN checkpoints; avoid broken HF load on Python 3.14+
+    if b == "cnn":
+        return False
+    if b in ("hybrid", "both"):
+        return True
+    # auto: AST when no CNN checkpoints, or hybrid when checkpoints exist
     return not cnn_checkpoints_exist()
 
 
@@ -96,19 +109,66 @@ def _classify_chunk(
 
     out: List[dict] = []
     for item in result:
-        out.append({"label": str(item["label"]), "score": float(item["score"])})
+        label = str(item["label"])
+        if should_skip_sound_label(label):
+            continue
+        out.append({"label": label, "score": float(item["score"])})
     return out
 
 
-def _use_cnn_backend(backend: str) -> bool:
-    from src.cnn.loader import should_use_cnn
+def _run_cnn_sed(
+    audio: Union[torch.Tensor, np.ndarray],
+    *,
+    sample_rate: int,
+    top_k: int,
+    threshold: float,
+    segment_sec: float,
+    max_windows: int,
+) -> List[dict]:
+    from src.cnn.inference import predict_sed_cnn
 
-    b = backend.lower()
-    if b == "cnn":
-        return True
-    if b in ("hf", "ast", "huggingface"):
-        return False
-    return should_use_cnn()
+    return predict_sed_cnn(
+        audio,
+        sample_rate=sample_rate,
+        top_k=top_k,
+        threshold=threshold,
+        segment_sec=segment_sec,
+        max_windows=max_windows,
+    )
+
+
+def _run_ast_sed(
+    wav: np.ndarray,
+    sample_rate: int,
+    *,
+    model_id: str,
+    device: Union[str, torch.device],
+    top_k: int,
+    threshold: float,
+    segment_sec: float,
+    max_windows: int,
+) -> List[dict]:
+    pipe = _get_sed_pipe(model_id, device)
+    best: dict[str, float] = {}
+
+    for chunk in sliding_audio_windows(
+        wav,
+        sample_rate,
+        segment_sec=segment_sec,
+        max_windows=max_windows,
+    ):
+        if len(chunk) < sample_rate // 4:
+            continue
+        for item in _classify_chunk(pipe, chunk, sample_rate, top_k):
+            label = item["label"]
+            best[label] = max(best.get(label, 0.0), item["score"])
+
+    ranked = sorted(best.items(), key=lambda x: x[1], reverse=True)
+    return [
+        {"label": label, "score": round(score, 4)}
+        for label, score in ranked
+        if score >= threshold
+    ]
 
 
 def detect_sound_events(
@@ -119,39 +179,54 @@ def detect_sound_events(
     device: Optional[Union[str, torch.device]] = None,
     top_k: int = 10,
     threshold: float = 0.2,
+    segment_sec: float = 2.5,
+    max_windows: int = 12,
     backend: str = "auto",
+    max_results: int = 12,
 ) -> List[dict]:
-    if _use_cnn_backend(backend):
-        from src.cnn.inference import predict_sed_cnn
-
-        events = predict_sed_cnn(
-            audio,
-            sample_rate=sample_rate,
-            top_k=top_k,
-            threshold=threshold,
-        )
-        if events or backend == "cnn":
-            return events
-
-    if not _hf_fallback_allowed(backend):
-        return []
-
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
-    try:
-        wav, sample_rate = _to_mono_wav(audio, sample_rate)
-        pipe = _get_sed_pipe(model_id, device)
-        merged = _classify_chunk(pipe, wav, sample_rate, top_k)
-    except Exception as exc:
-        logger.warning("SED skipped (HF model unavailable): %s", exc)
-        return []
+    wav, sample_rate = _to_mono_wav(audio, sample_rate)
+    cnn_events: List[dict] = []
+    ast_events: List[dict] = []
 
-    return [
-        {"label": e["label"], "score": round(e["score"], 4)}
-        for e in merged
-        if e["score"] >= threshold
-    ]
+    if _backend_uses_cnn(backend):
+        cnn_events = _run_cnn_sed(
+            wav,
+            sample_rate=sample_rate,
+            top_k=top_k,
+            threshold=threshold,
+            segment_sec=segment_sec,
+            max_windows=max_windows,
+        )
+
+    if _backend_uses_ast(backend):
+        try:
+            ast_events = _run_ast_sed(
+                wav,
+                sample_rate,
+                model_id=model_id,
+                device=device,
+                top_k=top_k,
+                threshold=threshold,
+                segment_sec=segment_sec,
+                max_windows=max_windows,
+            )
+        except Exception as exc:
+            logger.warning("AST SED skipped: %s", exc)
+
+    if cnn_events or ast_events:
+        return merge_sound_events(
+            cnn_events,
+            ast_events,
+            max_results=max_results,
+            min_score=0.0,
+        )
+
+    if backend.lower() == "cnn":
+        return cnn_events
+    return ast_events
 
 
 def detect_sound_events_segmented(
@@ -160,61 +235,25 @@ def detect_sound_events_segmented(
     sample_rate: int = 16000,
     model_id: str = "MIT/ast-finetuned-audioset-10-10-0.4593",
     device: Optional[Union[str, torch.device]] = None,
-    top_k: int = 8,
-    threshold: float = 0.12,
-    segment_sec: float = 2.0,
-    max_windows: int = 2,
+    top_k: int = 10,
+    threshold: float = 0.05,
+    segment_sec: float = 2.5,
+    max_windows: int = 12,
     backend: str = "auto",
+    max_results: int = 12,
 ) -> List[dict]:
     """
-    Fast multi-sound scan: full clip plus at most one extra window (not every 2s).
+    Scan the full clip with evenly spaced windows (CNN + AST in hybrid mode).
     """
-    if _use_cnn_backend(backend):
-        from src.cnn.inference import predict_sed_cnn
-
-        events = predict_sed_cnn(
-            audio,
-            sample_rate=sample_rate,
-            top_k=top_k,
-            threshold=threshold,
-            segment_sec=segment_sec,
-            max_windows=max_windows,
-        )
-        if events or backend == "cnn":
-            return events
-
-    if not _hf_fallback_allowed(backend):
-        return []
-
-    if device is None:
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-
-    try:
-        wav, sample_rate = _to_mono_wav(audio, sample_rate)
-        pipe = _get_sed_pipe(model_id, device)
-    except Exception as exc:
-        logger.warning("SED skipped (HF model unavailable): %s", exc)
-        return []
-
-    best: dict[str, float] = {}
-
-    def _merge(chunk: np.ndarray) -> None:
-        if len(chunk) < sample_rate // 4:
-            return
-        for item in _classify_chunk(pipe, chunk, sample_rate, top_k):
-            label = item["label"]
-            best[label] = max(best.get(label, 0.0), item["score"])
-
-    _merge(wav)
-
-    if max_windows > 1 and len(wav) > int(3 * sample_rate):
-        mid = len(wav) // 2
-        half = max(int(segment_sec * sample_rate), sample_rate)
-        _merge(wav[max(0, mid - half // 2) : min(len(wav), mid + half // 2)])
-
-    ranked = sorted(best.items(), key=lambda x: x[1], reverse=True)
-    return [
-        {"label": label, "score": round(score, 4)}
-        for label, score in ranked
-        if score >= threshold
-    ]
+    return detect_sound_events(
+        audio,
+        sample_rate=sample_rate,
+        model_id=model_id,
+        device=device,
+        top_k=top_k,
+        threshold=threshold,
+        segment_sec=segment_sec,
+        max_windows=max_windows,
+        backend=backend,
+        max_results=max_results,
+    )

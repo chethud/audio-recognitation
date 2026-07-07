@@ -5,10 +5,12 @@ from .speaker_diarization import (
     run_diarized_transcription,
     warmup_diarization,
 )
+from .speaker_utils import normalize_speaker_turns
 
 __all__ = [
     "diarize_speakers",
     "run_diarized_transcription",
     "warmup_diarization",
     "split_dialogue_speakers",
+    "normalize_speaker_turns",
 ]

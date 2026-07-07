@@ -48,6 +48,7 @@ def _run_asr_sed_emo(
     sed_threshold: float,
     sed_segment_sec: float,
     sed_max_windows: int,
+    sed_max_results: int,
     sed_backend: str,
     emotion_enabled: bool,
     emo_id: str,
@@ -90,6 +91,7 @@ def _run_asr_sed_emo(
                     threshold=sed_threshold,
                     segment_sec=sed_segment_sec,
                     max_windows=sed_max_windows,
+                    max_results=sed_max_results,
                     backend=sed_backend,
                 )
                 if sed_enabled
@@ -134,7 +136,8 @@ def run_alm_lite(
     sed_top_k: int = 5,
     sed_threshold: float = 0.15,
     sed_segment_sec: float = 3.0,
-    sed_max_windows: int = 2,
+    sed_max_windows: int = 12,
+    sed_max_results: int = 12,
     include_sed_scores: bool = False,
     emotion_model_id: Optional[str] = None,
     emotion_enabled: bool = True,
@@ -178,6 +181,7 @@ def run_alm_lite(
         sed_threshold=sed_threshold,
         sed_segment_sec=sed_segment_sec,
         sed_max_windows=sed_max_windows,
+        sed_max_results=sed_max_results,
         sed_backend=sed_backend,
         emotion_enabled=emotion_enabled,
         emo_id=emo_id,
@@ -217,6 +221,7 @@ def run_alm_lite(
                     threshold=sed_threshold,
                     segment_sec=sed_segment_sec,
                     max_windows=sed_max_windows,
+                    max_results=sed_max_results,
                     backend=sed_backend,
                 )
                 if sed_enabled
