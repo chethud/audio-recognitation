@@ -11,6 +11,7 @@ import { useAuth } from "../context/AuthContext.jsx";
 export default function Home() {
   const { user, logout } = useAuth();
   const [file, setFile] = useState(null);
+  const [language, setLanguage] = useState("en");
   const [question, setQuestion] = useState(
     "What can be inferred from the audio?"
   );
@@ -63,6 +64,7 @@ export default function Home() {
     }, 4000);
     try {
       const data = await analyzeAudio(file, question, {
+        language,
         skipWarmup: apiStatus === "ready",
         onStatus: (s) => {
           if (s === "ready") setApiStatus("ready");
@@ -110,13 +112,18 @@ export default function Home() {
             emotion, and an AI-generated answer — with automatic multi-language
             and multi-sound detection.
           </p>
-          {apiStatus !== "ready" ? (
+          {apiStatus === "waking" ? (
             <p className="mt-4 text-sm text-amber-200/90 rounded-lg border border-amber-400/25 bg-amber-500/10 px-3 py-2 max-w-xl mx-auto lg:mx-0">
-              {apiStatus === "checking" && "Connecting to API…"}
-              {apiStatus === "waking" &&
-                "Cannot reach the API. Start the backend: python run.py --port 8002"}
-              {apiStatus === "loading" &&
-                "Loading AI models (first start ~1–2 min). You can upload now — analysis waits until ready."}
+              Cannot reach the API. Start the backend:{" "}
+              <code className="text-amber-100">py -3.14 run.py --host 127.0.0.1 --port 8002</code>
+              , then refresh this page.
+            </p>
+          ) : apiStatus === "checking" || apiStatus === "loading" ? (
+            <p className="mt-4 inline-flex items-center gap-2 text-sm text-slate-400 rounded-lg border border-white/10 bg-white/5 px-3 py-2 max-w-xl mx-auto lg:mx-0">
+              <span className="h-3.5 w-3.5 rounded-full border-2 border-violet-400/40 border-t-violet-300 animate-spin" />
+              {apiStatus === "checking"
+                ? "Connecting…"
+                : "Getting AI models ready automatically…"}
             </p>
           ) : null}
         </section>
@@ -140,6 +147,8 @@ export default function Home() {
               <UploadAudio
                 file={file}
                 onFileChange={setFile}
+                language={language}
+                onLanguageChange={setLanguage}
                 question={question}
                 onQuestionChange={setQuestion}
                 onSubmit={handleSubmit}

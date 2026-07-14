@@ -10,43 +10,58 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 0   # 0 = full file; set e.g. 30 to cap analysis length
+  max_audio_length_sec: 0   # 0 = full file (no trim)
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
 # --- ALM-Lite: full AI pipeline (ASR + SED + emotion + LLM), speed-optimized ---
 alm_lite:
-  fast_mode: true   # ASR-only locally — full stack needs more RAM/page file
+  fast_mode: true   # local: ASR + CNN SED; emotion/LLM off (avoids heavy HF models)
   store_uploaded_audio: false
+  parallel_inference: false   # true can crash on Windows CPU; enable when stable
   asr:
-    model_id: "openai/whisper-base"   # much better for Kannada/Indic; use tiny only for speed tests
+    model_id: "openai/whisper-base"   # default (English / auto)
+    # Native-script models (openai/whisper-* often romanizes Kannada)
+    language_models:
+      # tiny was trained on news / COVID data and hallucinated near-identical
+      # Kannada boilerplate across unrelated clips. Base is larger + less biased.
+      kn: "vasista22/whisper-kannada-base"
     language: null   # auto-detect; supported: en, kn, hi, ta, te, ml
     preferred_languages: [en, kn, hi, ta, te, ml]
     segment_sec: 30
     max_segments: 1   # 1 = Whisper long-form chunking on full audio
   diarization:
-    enabled: true   # label speech as Person 1, Person 2, … when multiple speakers
+    enabled: true
+    backend: vad   # vad = VAD→speakers→Whisper-per-segment; falls back to text. whisperx|legacy crash on Windows.
+    whisper_model: null
+    min_switch_sec: 0.3
+    min_confidence: 0.35
+    gap_merge_sec: 0.45
+    batch_size: 8
+    align_batch_size: 16
     max_speakers: 6
-    window_sec: 1.5
-    hop_sec: 1.0     # larger hop = fewer embedding windows (faster)
+    window_sec: 1.2
+    hop_sec: 0.6
     min_segment_sec: 0.5
-    distance_threshold: 0.55
-    max_audio_sec: 0   # 0 = diarize full clip; set e.g. 300 to cap for speed
+    distance_threshold: 0.35
+    max_audio_sec: 0
+    vad_min_speech_sec: 0.25
+    vad_min_silence_sec: 0.25
   sed:
     enabled: true
-    backend: hybrid   # cnn + AST AudioSet (dog bark, phone ring, car horn, …)
+    backend: cnn   # local SED CNN only (AST/hybrid crash-prone on Windows with Whisper)
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
     top_k: 10
-    threshold: 0.04   # lower = more background sounds detected
+    threshold: 0.12   # CNN ESC-50 softmax; ignore near-uniform junk scores
     segment_sec: 2.5
-    max_windows: 12    # evenly spaced windows across full clip; 0 = auto
+    max_windows: 16
     max_results: 12
   emotion:
-    enabled: true
+    enabled: false   # off on Windows for stability (CNN/HF both crash-prone with Whisper)
     backend: cnn   # lightweight local CNN when checkpoints exist
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
-    enabled: true
+    enabled: false
     model_id: "Qwen/Qwen2-0.5B-Instruct"
     max_new_tokens: 32
     repetition_penalty: 1.1

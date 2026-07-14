@@ -32,15 +32,10 @@ _ESC50_DISPLAY: dict[str, str] = {
 }
 
 _SKIP_SUBSTRINGS = (
-    "speech",
-    "conversation",
-    "narration",
-    "monologue",
-    "silence",
-    "music",
     "sine wave",
     "white noise",
     "pink noise",
+    "silence",
 )
 
 

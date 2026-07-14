@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import io
 import logging
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -28,20 +29,43 @@ _FFMPEG_FORMATS = {
     ".mpg",
 }
 
+_cached_ffmpeg: str | None | bool = False  # False = not resolved yet
+
 
 def _find_ffmpeg() -> str | None:
-    """System ffmpeg on PATH, else bundled binary from imageio-ffmpeg (moviepy dep)."""
+    """System ffmpeg on PATH, else bundled binary from imageio-ffmpeg."""
+    global _cached_ffmpeg
+    if _cached_ffmpeg is not False:
+        return _cached_ffmpeg  # type: ignore[return-value]
+
     exe = shutil.which("ffmpeg")
     if exe:
+        _cached_ffmpeg = exe
         return exe
+
+    env_exe = os.environ.get("IMAGEIO_FFMPEG_EXE", "").strip()
+    if env_exe and Path(env_exe).is_file():
+        _cached_ffmpeg = env_exe
+        return env_exe
+
     try:
         import imageio_ffmpeg
 
         bundled = imageio_ffmpeg.get_ffmpeg_exe()
         if bundled and Path(bundled).is_file():
+            # Ensure later shutil.which / child tools can find it
+            bin_dir = str(Path(bundled).resolve().parent)
+            path = os.environ.get("PATH", "")
+            if bin_dir.lower() not in path.lower():
+                os.environ["PATH"] = bin_dir + os.pathsep + path
+            os.environ.setdefault("IMAGEIO_FFMPEG_EXE", bundled)
+            _cached_ffmpeg = bundled
+            logger.info("Using bundled ffmpeg: %s", bundled)
             return bundled
     except Exception as exc:
-        logger.debug("imageio_ffmpeg unavailable: %s", exc)
+        logger.warning("imageio_ffmpeg unavailable: %s", exc)
+
+    _cached_ffmpeg = None
     return None
 
 
@@ -104,7 +128,11 @@ def _load_with_ffmpeg(path: Path, sr: int, max_sec: float) -> torch.Tensor | Non
 
     try:
         proc = subprocess.run(cmd, capture_output=True, check=True, timeout=timeout)
-    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError) as e:
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+        logger.warning("ffmpeg decode failed for %s: %s", path.name, err or e)
+        return None
+    except (subprocess.TimeoutExpired, OSError) as e:
         logger.warning("ffmpeg decode failed for %s: %s", path.name, e)
         return None
 
@@ -147,16 +175,25 @@ def load_audio_from_file(
     if tensor is not None:
         return tensor
 
+    ffmpeg = _find_ffmpeg()
     if suffix in _FFMPEG_FORMATS:
+        if not ffmpeg:
+            raise RuntimeError(
+                "Could not decode this audio/video file: ffmpeg not found. "
+                "In the project venv run: pip install imageio-ffmpeg"
+            )
         raise RuntimeError(
-            "Could not decode this audio/video file. Install ffmpeg on PATH or run: "
-            "pip install imageio-ffmpeg"
+            f"Could not decode '{path.name}' with ffmpeg ({ffmpeg}). "
+            "Try converting to WAV/MP3, or re-export the file."
         )
 
-    load_kw: dict = {"sr": sr, "mono": True}
-    if limit > 0:
-        load_kw["duration"] = limit
-
-    y, _file_sr = librosa.load(str(path), **load_kw)
-    x = torch.from_numpy(y.astype(np.float32)).unsqueeze(0)
-    return x
+    try:
+        load_kw: dict = {"sr": sr, "mono": True}
+        if limit > 0:
+            load_kw["duration"] = limit
+        y, _file_sr = librosa.load(str(path), **load_kw)
+        return torch.from_numpy(y.astype(np.float32)).unsqueeze(0)
+    except Exception as exc:
+        raise RuntimeError(
+            f"Could not decode '{path.name}'. Tried soundfile/ffmpeg/librosa. ({exc})"
+        ) from exc

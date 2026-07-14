@@ -13,9 +13,12 @@ RUN pip install --no-cache-dir --upgrade pip \
 
 COPY . .
 
+# PyAnnote diarization reads HF_TOKEN at runtime (set in Render/Vercel dashboard or docker run -e).
+# Accept https://huggingface.co/pyannote/speaker-diarization-3.1 before first deploy.
 ENV PYTHONUNBUFFERED=1 \
     TORCHDYNAMO_DISABLE=1 \
-    HF_HOME=/app/.cache/huggingface
+    HF_HOME=/app/.cache/huggingface \
+    HF_TOKEN=""
 
 EXPOSE 8000
 

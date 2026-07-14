@@ -6,6 +6,16 @@
 - **Render Standard (2 GB RAM)** or higher — free tier will OOM on Whisper + CNN
 - **Python 3.11** (Dockerfile uses 3.11-slim)
 - **CNN checkpoints** (`outputs/*.pt`) — train on Render shell or copy from local machine
+- **HF_TOKEN** — Hugging Face token with access to [pyannote/speaker-diarization-3.1](https://huggingface.co/pyannote/speaker-diarization-3.1) (required for WhisperX+PyAnnote speaker diarization)
+
+**Local diarization setup (Windows):**
+
+```powershell
+$env:HF_TOKEN = "hf_your_token"
+.\setup-diarization.ps1
+```
+
+Use **Python 3.11** (WhisperX does not support 3.14). The Docker image already uses 3.11.
 
 ---
 
@@ -40,11 +50,17 @@
 > **Do not use Python 3.14** — AST/HuggingFace may fail. Use **3.11**.
 
 ### After deploy
+
+1. In Render → **Environment** → add secret **`HF_TOKEN`** (your Hugging Face token; accept pyannote model terms first).
+2. Redeploy if the service was created before `HF_TOKEN` was set.
+3. Optional — train CNN checkpoints on Render shell:
+
    ```bash
    python -m training.run_notebook_pipeline --quick --batch-size 2
    ```
-9. Copy your API URL, e.g. `https://alm-lite-api.onrender.com`
-10. Test: `https://YOUR-URL.onrender.com/health` → `"model_ready": true`
+
+4. Copy your API URL, e.g. `https://alm-lite-api.onrender.com`
+5. Test: `https://YOUR-URL.onrender.com/health` → `"model_ready": true`
 
 ---
 

@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 
+const LANGUAGE_OPTIONS = [
+  { value: "en", label: "English" },
+  { value: "kn", label: "Kannada" },
+];
+
 export default function UploadAudio({
   file,
   onFileChange,
@@ -9,6 +14,8 @@ export default function UploadAudio({
   loading,
   loadingStage = "",
   disabled,
+  language = "en",
+  onLanguageChange,
 }) {
   const [previewUrl, setPreviewUrl] = useState(null);
   const [dragOver, setDragOver] = useState(false);
@@ -97,6 +104,35 @@ export default function UploadAudio({
             </audio>
           </div>
         )}
+      </div>
+
+      <div>
+        <label className="block text-sm font-medium text-slate-300/90 mb-2">
+          Audio language
+        </label>
+        <div className="grid grid-cols-2 gap-2">
+          {LANGUAGE_OPTIONS.map((opt) => {
+            const active = language === opt.value;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => onLanguageChange?.(opt.value)}
+                aria-pressed={active}
+                className={`rounded-lg border px-4 py-2.5 text-sm font-medium transition ${
+                  active
+                    ? "border-violet-400/60 bg-violet-500/20 text-white shadow-[0_0_12px_rgba(139,92,246,0.35)]"
+                    : "border-white/10 bg-white/5 text-slate-300 hover:border-white/25 hover:text-white"
+                }`}
+              >
+                {opt.label}
+              </button>
+            );
+          })}
+        </div>
+        <p className="text-xs text-slate-500 mt-1.5">
+          Pick the spoken language for faster, more accurate transcription.
+        </p>
       </div>
 
       <div>

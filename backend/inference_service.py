@@ -168,8 +168,12 @@ def is_ready() -> bool:
     return _warmed
 
 
-def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
-    """Run pipeline on an audio file path. Returns worker-style result dict."""
+def analyze_file(audio_path: str, question: str, language: Optional[str] = None) -> dict[str, Any]:
+    """Run pipeline on an audio file path. Returns worker-style result dict.
+
+    ``language`` (e.g. "en" or "kn") forces the ASR language and skips
+    auto-detection, which is significantly faster.
+    """
     from src.pipeline import run_alm_lite
     from src.utils import load_audio_from_file
 
@@ -177,6 +181,7 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
     data_cfg = cfg.get("data", {})
     alm = _alm_cfg(cfg)
     fast = _is_fast(cfg)
+    parallel = bool(alm.get("parallel_inference", False))
     asr_cfg = alm.get("asr", {})
     sed_cfg = alm.get("sed", {})
     llm_cfg = alm.get("llm", {})
@@ -200,7 +205,7 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 question,
                 sample_rate=data_cfg.get("sample_rate", 16000),
                 asr_model_id=asr_cfg.get("model_id", "openai/whisper-tiny"),
-                asr_language=asr_cfg.get("language"),
+                asr_language=(language or "").strip() or asr_cfg.get("language"),
                 sed_model_id=sed_cfg.get(
                     "model_id", "MIT/ast-finetuned-audioset-10-10-0.4593"
                 ),
@@ -225,21 +230,28 @@ def analyze_file(audio_path: str, question: str) -> dict[str, Any]:
                 max_duration_sec=max_sec if max_sec and max_sec > 0 else None,
                 sed_backend=sed_cfg.get("backend", "auto"),
                 emotion_backend=emo_cfg.get("backend", "auto"),
+                parallel=parallel,
             )
             return {
                 "ok": True,
                 "answer": result["answer"],
+                "summary": result.get("summary", result["answer"]),
                 "transcript": result["transcript"],
                 "transcript_original": result.get("transcript_original", ""),
+                "formatted_transcript": result.get("formatted_transcript", ""),
                 "language": result.get("language", "en"),
                 "language_name": result.get("language_name", "English"),
                 "languages": result.get("languages", []),
                 "language_names": result.get("language_names", []),
                 "speaker_turns": result.get("speaker_turns", []),
                 "num_speakers": result.get("num_speakers", 0),
+                "detected_speakers": result.get("detected_speakers", []),
                 "sound_events": result["sound_events"],
                 "emotion": result.get("emotion", "neutral"),
                 "context": result["context"],
+                "wav_sha256": "",
+                "audio_sha256": (os.environ.get("ALM_AUDIO_SHA256") or "").strip(),
+                "temp_filename": Path(audio_path).name,
             }
         except Exception as e:
             return {"ok": False, "error": f"{type(e).__name__}: {str(e)}"}

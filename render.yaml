@@ -23,3 +23,5 @@ services:
         value: "1"
       - key: HF_HOME
         value: /app/.cache/huggingface
+      - key: HF_TOKEN
+        sync: false

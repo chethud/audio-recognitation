@@ -1,16 +1,21 @@
 """
 ALM Backend API - Robust, crash-resistant design.
 Runs inference in-process with cached models (fast). Persistence: SQLite at data/alm.db.
+
+POST /analyze always runs fresh inference on the uploaded bytes. SQLite is
+write-only for history — it is never read to build the /analyze response.
 """
 import json
 import logging
 import os
+import re
 import sqlite3
 import subprocess
 import sys
 import tempfile
 import threading
 import asyncio
+import uuid
 from pathlib import Path
 
 from src.env_setup import configure_ml_env
@@ -127,7 +132,89 @@ async def global_exception_handler(request: Request, exc: Exception):
     return JSONResponse(status_code=500, content={"detail": f"{type(exc).__name__}: {str(exc)}"})
 
 
-def _run_worker(script_path: Path, audio_path: str, question: str, output_path: str, question_file: str) -> dict:
+def _worker_env(
+    language: str | None = None,
+    *,
+    upload_name: str = "",
+    temp_name: str = "",
+    audio_sha256: str = "",
+    audio_bytes: int | None = None,
+) -> dict:
+    """Env for the inference subprocess (ffmpeg + thread limits + audio identity)."""
+    env = {
+        **os.environ,
+        "TF_CPP_MIN_LOG_LEVEL": "3",
+        "TRANSFORMERS_NO_TF": "1",
+        "USE_TF": "0",
+        "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
+        "HF_HUB_DISABLE_PROGRESS_BARS": "1",
+        "TRANSFORMERS_VERBOSITY": "error",
+        "TOKENIZERS_PARALLELISM": "false",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+        "ALM_ASR_LANGUAGE": (language or "").strip(),
+        "ALM_UPLOAD_NAME": (upload_name or "").strip(),
+        "ALM_TEMP_NAME": (temp_name or "").strip(),
+        "ALM_AUDIO_SHA256": (audio_sha256 or "").strip(),
+        "ALM_AUDIO_BYTES": str(int(audio_bytes) if audio_bytes is not None else ""),
+        # No transcript/result memoization. Model weights may stay in memory.
+        "ALM_DISABLE_TRANSCRIPT_CACHE": "1",
+        # CT2/faster-whisper OOMs then poisons the HF Whisper stage on Windows.
+        "ALM_ENABLE_CT2": os.environ.get("ALM_ENABLE_CT2", "0"),
+    }
+    ffmpeg = os.environ.get("IMAGEIO_FFMPEG_EXE", "").strip()
+    if not ffmpeg:
+        try:
+            import imageio_ffmpeg
+
+            ffmpeg = imageio_ffmpeg.get_ffmpeg_exe() or ""
+        except Exception:
+            ffmpeg = ""
+    if ffmpeg:
+        env["IMAGEIO_FFMPEG_EXE"] = ffmpeg
+        bin_dir = str(Path(ffmpeg).resolve().parent)
+        env["PATH"] = bin_dir + os.pathsep + env.get("PATH", "")
+    return env
+
+
+def _clean_worker_stderr(stderr: str) -> str:
+    """Drop HF rate-limit noise; keep last [alm-worker] stage for crash reports."""
+    lines = []
+    last_stage = ""
+    for line in (stderr or "").splitlines():
+        s = line.strip()
+        if not s:
+            continue
+        low = s.lower()
+        if "unauthenticated requests to the hf hub" in low:
+            continue
+        if "hf_token" in low and "rate limit" in low:
+            continue
+        if s.startswith("[alm-worker]"):
+            last_stage = s
+            continue
+        lines.append(s)
+    tip = ""
+    if last_stage:
+        tip = f" Last stage: {last_stage.replace('[alm-worker] ', '')}."
+    body = " ".join(lines)[:280]
+    return f"{tip} {body}".strip()
+
+
+def _run_worker(
+    script_path: Path,
+    audio_path: str,
+    question: str,
+    output_path: str,
+    question_file: str,
+    language: str | None = None,
+    *,
+    upload_name: str = "",
+    audio_sha256: str = "",
+    audio_bytes: int | None = None,
+) -> dict:
     """Run inference worker subprocess. Passes question via file to avoid Windows arg issues."""
     import json
     if not script_path.exists():
@@ -139,16 +226,25 @@ def _run_worker(script_path: Path, audio_path: str, question: str, output_path: 
             capture_output=True,
             text=True,
             timeout=INFERENCE_TIMEOUT_SEC,
-            env={
-                **os.environ,
-                "TF_CPP_MIN_LOG_LEVEL": "3",
-                "TRANSFORMERS_NO_TF": "1",
-                "USE_TF": "0",
-                "HF_HUB_DISABLE_SYMLINKS_WARNING": "1",
-                "HF_HUB_DISABLE_PROGRESS_BARS": "1",
-                "TRANSFORMERS_VERBOSITY": "error",
-            },
+            env=_worker_env(
+                language,
+                upload_name=upload_name,
+                temp_name=Path(audio_path).name,
+                audio_sha256=audio_sha256,
+                audio_bytes=audio_bytes,
+            ),
         )
+        # Native crash (access violation) => no output file / non-zero return
+        if result.returncode != 0 and not Path(output_path).exists():
+            detail = _clean_worker_stderr(result.stderr or "")
+            return {
+                "ok": False,
+                "error": (
+                    f"Inference worker crashed (exit {result.returncode}). "
+                    f"Try again, or pick English/Kannada explicitly."
+                    + (f" {detail}" if detail else "")
+                ).strip(),
+            }
         if Path(output_path).exists():
             data = json.loads(Path(output_path).read_text(encoding="utf-8"))
         else:
@@ -170,23 +266,85 @@ def _run_worker(script_path: Path, audio_path: str, question: str, output_path: 
 
 
 def _use_subprocess_inference() -> bool:
-    return os.getenv("ALM_SUBPROCESS_INFERENCE", "").strip().lower() in ("1", "true", "yes")
+    """Isolate ML in a child process so native crashes cannot kill the API."""
+    env = os.getenv("ALM_SUBPROCESS_INFERENCE", "").strip().lower()
+    if env in ("1", "true", "yes"):
+        return True
+    if env in ("0", "false", "no"):
+        return False
+    # Default ON for Windows — Wav2Vec2/torch segfaults were taking down uvicorn.
+    return sys.platform == "win32"
 
 
-def _run_modular_inference(audio_path: str, question: str, output_path: str, question_file: str) -> dict:
-    """Run ALM-Lite; in-process with cached models by default (fast)."""
+def _run_modular_inference(
+    audio_path: str,
+    question: str,
+    output_path: str,
+    question_file: str,
+    language: str | None = None,
+    *,
+    upload_name: str = "",
+    audio_sha256: str = "",
+    audio_bytes: int | None = None,
+) -> dict:
+    """Run ALM-Lite; subprocess on Windows by default (crash-isolated)."""
     if _use_subprocess_inference():
-        return _run_worker(WORKER_SCRIPT_MODULAR, audio_path, question, output_path, question_file)
+        return _run_worker(
+            WORKER_SCRIPT_MODULAR,
+            audio_path,
+            question,
+            output_path,
+            question_file,
+            language=language,
+            upload_name=upload_name,
+            audio_sha256=audio_sha256,
+            audio_bytes=audio_bytes,
+        )
     if not inference_service.is_ready():
         raise HTTPException(
             503,
             "Models are still loading. Wait until /health returns model_ready=true, then retry.",
         )
-    return inference_service.analyze_file(audio_path, question)
+    # Propagate identity into in-process path (same env keys the worker uses).
+    if upload_name:
+        os.environ["ALM_UPLOAD_NAME"] = upload_name
+    os.environ["ALM_TEMP_NAME"] = Path(audio_path).name
+    if audio_sha256:
+        os.environ["ALM_AUDIO_SHA256"] = audio_sha256
+    if audio_bytes is not None:
+        os.environ["ALM_AUDIO_BYTES"] = str(int(audio_bytes))
+    if language:
+        os.environ["ALM_ASR_LANGUAGE"] = language
+    return inference_service.analyze_file(audio_path, question, language=language)
 
 
-def _run_inference_worker_modular(audio_path: str, question: str, output_path: str, question_file: str) -> dict:
-    return _run_modular_inference(audio_path, question, output_path, question_file)
+def _run_inference_worker_modular(
+    audio_path: str,
+    question: str,
+    output_path: str,
+    question_file: str,
+    language: str | None = None,
+    *,
+    upload_name: str = "",
+    audio_sha256: str = "",
+    audio_bytes: int | None = None,
+) -> dict:
+    return _run_modular_inference(
+        audio_path,
+        question,
+        output_path,
+        question_file,
+        language,
+        upload_name=upload_name,
+        audio_sha256=audio_sha256,
+        audio_bytes=audio_bytes,
+    )
+
+
+def _safe_upload_stem(filename: str) -> str:
+    stem = Path(filename or "audio").stem
+    stem = re.sub(r"[^\w\-]+", "_", stem, flags=re.UNICODE).strip("_")
+    return (stem[:40] or "audio")
 
 
 def _sound_events_to_labels(sound_events: list) -> list[str]:
@@ -325,14 +483,21 @@ async def inference(
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        tmp_path = tmpdir / f"audio{suffix}"
+        unique_name = f"{uuid.uuid4().hex}_{_safe_upload_stem(file.filename)}{suffix}"
+        tmp_path = tmpdir / unique_name
         tmp_path.write_bytes(content)
         output_path = tmpdir / "result.json"
         qfile = tmpdir / "question.txt"
         qfile.write_text(question.strip(), encoding="utf-8")
 
         result = _run_inference_worker_modular(
-            str(tmp_path), question.strip(), str(output_path), str(qfile)
+            str(tmp_path),
+            question.strip(),
+            str(output_path),
+            str(qfile),
+            upload_name=file.filename or unique_name,
+            audio_sha256=__import__("hashlib").sha256(content).hexdigest(),
+            audio_bytes=len(content),
         )
 
     if not result.get("ok"):
@@ -386,6 +551,10 @@ async def analyze(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     question: str = Form("What can be inferred from the audio?"),
+    language: str = Form(
+        "",
+        description="ASR language code (e.g. 'en' or 'kn'). Empty = auto-detect.",
+    ),
 ):
     """
     ALM-Lite production endpoint: ASR + SED + emotion + LLM.
@@ -397,6 +566,11 @@ async def analyze(
         raise HTTPException(400, "Question cannot be empty")
     if len(question) > MAX_QUESTION_LEN:
         raise HTTPException(400, f"Question too long (max {MAX_QUESTION_LEN} chars)")
+
+    language = (language or "").strip().lower()
+    if language and language not in {"en", "kn"}:
+        # Ignore unsupported codes rather than failing — fall back to auto-detect.
+        language = ""
 
     suffix = Path(file.filename).suffix.lower()
     if suffix not in ALLOWED_EXTENSIONS:
@@ -410,13 +584,31 @@ async def analyze(
     if size_mb > MAX_FILE_SIZE_MB:
         raise HTTPException(400, f"File too large (max {MAX_FILE_SIZE_MB}MB)")
 
+    from src.asr.audio_trace import log_audio_identity, sha256_bytes
+
+    audio_sha256 = sha256_bytes(content)
+    unique_name = f"{uuid.uuid4().hex}_{_safe_upload_stem(file.filename)}{suffix}"
+
     with tempfile.TemporaryDirectory() as tmpdir:
         tmpdir = Path(tmpdir)
-        tmp_path = tmpdir / f"audio{suffix}"
+        tmp_path = tmpdir / unique_name
         tmp_path.write_bytes(content)
-        output_path = tmpdir / "result.json"
-        qfile = tmpdir / "question.txt"
+        # Verify bytes on disk match the upload (guards against wrong-file reuse).
+        on_disk = tmp_path.read_bytes()
+        if len(on_disk) != len(content) or sha256_bytes(on_disk) != audio_sha256:
+            raise HTTPException(500, "Temp file write verification failed")
+        output_path = tmpdir / f"result_{uuid.uuid4().hex}.json"
+        qfile = tmpdir / f"question_{uuid.uuid4().hex}.txt"
         qfile.write_text(question.strip(), encoding="utf-8")
+
+        log_audio_identity(
+            stage="upload",
+            upload_name=file.filename or "",
+            temp_path=tmp_path,
+            file_bytes=len(content),
+            file_sha256=audio_sha256,
+            language=language or "auto",
+        )
 
         result = await asyncio.to_thread(
             _run_inference_worker_modular,
@@ -424,6 +616,10 @@ async def analyze(
             question.strip(),
             str(output_path),
             str(qfile),
+            language or None,
+            upload_name=file.filename or unique_name,
+            audio_sha256=audio_sha256,
+            audio_bytes=len(content),
         )
 
     if not result.get("ok"):
@@ -450,6 +646,16 @@ async def analyze(
     emotion = result.get("emotion", "") or "neutral"
     speaker_turns = result.get("speaker_turns") or []
     num_speakers = int(result.get("num_speakers") or 0)
+    detected_speakers = result.get("detected_speakers") or []
+    if not detected_speakers and speaker_turns:
+        seen = []
+        for t in speaker_turns:
+            sp = (t.get("speaker") or "").strip()
+            if sp and sp not in seen:
+                seen.append(sp)
+        detected_speakers = seen
+    formatted_transcript = result.get("formatted_transcript") or ""
+    summary = result.get("summary") or answer
 
     alm = _alm_settings()
     store_audio = bool(alm.get("store_uploaded_audio", False))
@@ -481,6 +687,13 @@ async def analyze(
         log_id=None,
         speaker_turns=speaker_turns,
         num_speakers=num_speakers,
+        detected_speakers=detected_speakers,
+        formatted_transcript=formatted_transcript,
+        summary=summary,
+        audio_sha256=audio_sha256,
+        audio_bytes=len(content),
+        temp_filename=unique_name,
+        wav_sha256=str(result.get("wav_sha256") or ""),
     )
 
 

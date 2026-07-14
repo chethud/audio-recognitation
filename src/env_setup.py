@@ -3,6 +3,26 @@ from __future__ import annotations
 
 import logging
 import os
+from pathlib import Path
+
+
+def _ensure_ffmpeg_on_path() -> None:
+    """Make bundled imageio-ffmpeg visible to subprocesses and shutil.which."""
+    try:
+        import imageio_ffmpeg
+
+        exe = imageio_ffmpeg.get_ffmpeg_exe()
+        if not exe or not Path(exe).is_file():
+            return
+        bin_dir = str(Path(exe).resolve().parent)
+        path = os.environ.get("PATH", "")
+        if bin_dir.lower() not in path.lower():
+            os.environ["PATH"] = bin_dir + os.pathsep + path
+        # Parent may pass IMAGEIO_FFMPEG_EXE="" — override empty values.
+        if not os.environ.get("IMAGEIO_FFMPEG_EXE", "").strip():
+            os.environ["IMAGEIO_FFMPEG_EXE"] = exe
+    except Exception:
+        pass
 
 
 def configure_ml_env() -> None:
@@ -13,6 +33,17 @@ def configure_ml_env() -> None:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
+    # Fewer OpenMP/MKL threads — reduces native crashes with torch+Whisper on Windows.
+    os.environ.setdefault("OMP_NUM_THREADS", "1")
+    os.environ.setdefault("MKL_NUM_THREADS", "1")
+    os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
+    os.environ.setdefault("NUMEXPR_NUM_THREADS", "1")
+    _ensure_ffmpeg_on_path()
 
-    for name in ("transformers", "huggingface_hub", "filelock"):
+    for name in (
+        "transformers",
+        "huggingface_hub",
+        "huggingface_hub.utils._http",
+        "filelock",
+    ):
         logging.getLogger(name).setLevel(logging.ERROR)

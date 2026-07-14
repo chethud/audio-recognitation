@@ -25,6 +25,23 @@ INDIC_LANGUAGE_CODES = frozenset(code for code, _ in _SCRIPT_RANGES)
 PRIMARY_LANGUAGE_CODES = frozenset({"en", "kn", "hi", "ta", "te", "ml"})
 
 
+def is_low_quality_indic(text: str) -> bool:
+    """True when native-script ASR looks like hallucination junk."""
+    if not text:
+        return True
+    low = text.lower()
+    if "commission" in low or "subscribe" in low:
+        return True
+    kn = re.findall(r"[\u0C80-\u0CFF]", text)
+    # Very short Kannada snippets can still be valid ASR for short crops —
+    # only flag tiny fragments that are clearly empty of content.
+    if 0 < len(kn) < 4:
+        return True
+    if len(kn) >= 8 and len(set(kn)) <= 3:
+        return True
+    return False
+
+
 def strip_language_tag_prefix(text: str) -> str:
     """Remove leading '[Kannada] ' style tag from stored originals."""
     return re.sub(r"^\[[^\]]+\]\s*", "", (text or "").strip()).strip()
@@ -101,14 +118,68 @@ def collapse_repeated_phrases(text: str) -> str:
     )
 
     # Repeated multi-word phrase in a row (4+ chars, 2+ repeats).
-    cleaned = re.sub(
-        r"(.{4,120}?)(?:\s*\1){2,}",
-        r"\1",
-        cleaned,
-        flags=re.DOTALL,
-    )
+    for _ in range(4):
+        nxt = re.sub(
+            r"(.{4,80}?)(?:\s+\1){1,}",
+            r"\1",
+            cleaned,
+            flags=re.DOTALL,
+        )
+        if nxt == cleaned:
+            break
+        cleaned = nxt
 
+    cleaned = _collapse_frequent_word_ngrams(cleaned)
     return _normalize_phrase(cleaned)
+
+
+def _collapse_frequent_word_ngrams(text: str, *, max_n: int = 8, min_count: int = 3) -> str:
+    """
+    Drop over-repeated n-grams that Whisper often loops across a long Kannada clip
+    (e.g. 'ಸರ್ಕಾರ ಕೈಗೊಂಡಿದೆ' / 'ಮಾತನಾಡಿದ ಅವರು' appearing many times).
+    Keeps the first occurrence of heavily repeated phrases.
+    """
+    words = text.split()
+    if len(words) < 12:
+        return text
+
+    # Count n-grams
+    counts: dict[tuple[str, ...], int] = {}
+    for n in range(max_n, 1, -1):
+        for i in range(0, len(words) - n + 1):
+            gram = tuple(words[i : i + n])
+            # Skip very short tokens-only grams
+            if sum(len(w) for w in gram) < 8:
+                continue
+            counts[gram] = counts.get(gram, 0) + 1
+
+    bad = {g for g, c in counts.items() if c >= min_count}
+    if not bad:
+        return text
+
+    # Prefer collapsing longer grams first
+    ordered = sorted(bad, key=lambda g: (-len(g), -counts[g]))
+    out: list[str] = []
+    i = 0
+    seen: set[tuple[str, ...]] = set()
+    while i < len(words):
+        matched = False
+        for gram in ordered:
+            n = len(gram)
+            if i + n <= len(words) and tuple(words[i : i + n]) == gram:
+                if gram in seen and counts[gram] >= min_count:
+                    i += n
+                    matched = True
+                    break
+                seen.add(gram)
+                out.extend(gram)
+                i += n
+                matched = True
+                break
+        if not matched:
+            out.append(words[i])
+            i += 1
+    return " ".join(out)
 
 
 def _collapse_whole_string_loops(text: str, *, min_unit: int = 6) -> str:
@@ -159,6 +230,28 @@ def clean_asr_text(text: str) -> str:
     cleaned = re.sub(r"\b(\w+)(?:\s+\1){3,}\b", r"\1", cleaned, flags=re.IGNORECASE)
     cleaned = collapse_repeated_phrases(cleaned)
     return cleaned
+
+
+def clean_asr_text_preserve_content(text: str) -> str:
+    """Lighter cleanup for Kannada: collapse only exact consecutive stutters."""
+    if not text:
+        return text
+    cleaned = text.strip()
+    cleaned = re.sub(
+        r"(?:\b[A-Za-z]-){12,}[A-Za-z]?\b",
+        "[vocalization]",
+        cleaned,
+    )
+    # Remove whole-string copy loops only — do not drop cross-sentence n-grams
+    # that made unrelated clips look like the same transcript.
+    cleaned = _collapse_whole_string_loops(_normalize_phrase(cleaned))
+    cleaned = re.sub(
+        rf"({_UNICODE_WORD})(?:\s+\1){{3,}}",
+        r"\1",
+        cleaned,
+        flags=re.UNICODE,
+    )
+    return _normalize_phrase(cleaned)
 
 
 def is_meaningful_speech(text: str) -> bool:

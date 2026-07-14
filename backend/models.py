@@ -46,6 +46,14 @@ class AnalyzeResponse(BaseModel):
     log_id: Optional[str] = None  # SQLite analyze_logs.id
     speaker_turns: List[dict] = []
     num_speakers: int = 0
+    detected_speakers: List[str] = []
+    formatted_transcript: str = ""
+    summary: str = ""
+    # Per-request audio identity (proves fresh inference, not a cached transcript).
+    audio_sha256: str = ""
+    audio_bytes: int = 0
+    temp_filename: str = ""
+    wav_sha256: str = ""
 
 
 class AnalyzeLogItem(BaseModel):

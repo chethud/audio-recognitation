@@ -40,6 +40,7 @@ def _run_asr_sed_emo(
     max_duration_sec: Optional[float],
     asr_segment_sec: float,
     asr_max_segments: int,
+    asr_language: Optional[str],
     diarization_enabled: bool,
     diarization_cfg: dict,
     sed_enabled: bool,
@@ -64,6 +65,7 @@ def _run_asr_sed_emo(
         max_duration_sec=max_duration_sec,
         segment_sec=asr_segment_sec,
         max_segments=asr_max_segments,
+        language=asr_language,
         diarization_enabled=diarization_enabled,
         diarization_max_speakers=int(diarization_cfg.get("max_speakers", 6)),
         diarization_window_sec=float(diarization_cfg.get("window_sec", 1.2)),
@@ -147,20 +149,39 @@ def run_alm_lite(
     max_duration_sec: Optional[float] = None,
     sed_backend: str = "auto",
     emotion_backend: str = "auto",
+    parallel: bool = False,
 ) -> Dict[str, Any]:
     if device is None:
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
     dev = _resolve_device(device)
-    run_parallel = dev.type == "cuda"
+    # Run ASR + SED + emotion concurrently on GPU, or on CPU when explicitly enabled.
+    run_parallel = dev.type == "cuda" or parallel
 
     if fast_mode:
         llm_enabled = False
-        from src.cnn.loader import should_use_cnn
+        # On Windows, HF AST + emotion stacked with Whisper often segfaults.
+        # Keep lightweight CNN SED when checkpoints exist; still skip emotion.
+        import sys
 
-        cnn_emotion = should_use_cnn() and emotion_backend.lower() in ("auto", "cnn")
-        if not cnn_emotion:
+        if sys.platform == "win32":
             emotion_enabled = False
+            if sed_enabled:
+                from src.cnn.loader import should_use_cnn
+
+                if should_use_cnn() and str(sed_backend).lower() in ("auto", "cnn"):
+                    sed_backend = "cnn"
+                else:
+                    # No local CNN weights → leave SED off rather than loading AST.
+                    sed_enabled = False
+            else:
+                sed_enabled = False
+        else:
+            from src.cnn.loader import should_use_cnn
+
+            cnn_emotion = should_use_cnn() and emotion_backend.lower() in ("auto", "cnn")
+            if not cnn_emotion:
+                emotion_enabled = False
 
     emo_id = emotion_model_id or "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
     dia_cfg = diarization_cfg or {}
@@ -173,6 +194,7 @@ def run_alm_lite(
         max_duration_sec=max_duration_sec,
         asr_segment_sec=asr_segment_sec,
         asr_max_segments=asr_max_segments,
+        asr_language=asr_language,
         diarization_enabled=diarization_enabled,
         diarization_cfg=dia_cfg,
         sed_enabled=sed_enabled,
@@ -200,6 +222,7 @@ def run_alm_lite(
                 max_duration_sec=max_duration_sec,
                 segment_sec=asr_segment_sec,
                 max_segments=asr_max_segments,
+                language=asr_language,
                 diarization_enabled=diarization_enabled,
                 diarization_max_speakers=int(dia_cfg.get("max_speakers", 6)),
                 diarization_window_sec=float(dia_cfg.get("window_sec", 1.2)),
@@ -256,6 +279,21 @@ def run_alm_lite(
     speaker_turns = asr.speaker_turns
     num_speakers = asr.num_speakers
 
+    # Speech-heavy clips rarely hit ESC-50 classes confidently — if ASR found
+    # speech, surface that so "Detected Sounds" is not empty.
+    from src.asr.text_cleanup import is_meaningful_speech
+
+    if is_meaningful_speech(transcript) or is_meaningful_speech(transcript_original):
+        has_speech_label = any(
+            isinstance(e, dict) and "speech" in str(e.get("label", "")).lower()
+            for e in sound_events
+        )
+        if not has_speech_label:
+            sound_events = [
+                {"label": "Speech", "score": 0.95},
+                *list(sound_events or []),
+            ]
+
     context = build_structured_context(
         transcript,
         sound_events,
@@ -299,6 +337,18 @@ def run_alm_lite(
             languages=languages,
         )
 
+    from src.diarization.transcript_formatter import (
+        detected_speakers,
+        format_conversation_transcript,
+    )
+
+    speakers = detected_speakers(speaker_turns) if speaker_turns else []
+    formatted = (
+        format_conversation_transcript(speaker_turns)
+        if speaker_turns
+        else (transcript or "")
+    )
+
     return {
         "transcript": transcript,
         "transcript_original": transcript_original,
@@ -308,8 +358,11 @@ def run_alm_lite(
         "language_names": language_names,
         "speaker_turns": speaker_turns,
         "num_speakers": num_speakers,
+        "detected_speakers": speakers,
+        "formatted_transcript": formatted,
         "sound_events": sound_events,
         "emotion": emotion_label,
         "context": context,
         "answer": answer,
+        "summary": answer,
     }

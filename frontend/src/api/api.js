@@ -120,7 +120,11 @@ export async function logoutRequest() {
  * @param {File} file
  * @param {string} question
  */
-export async function analyzeAudio(file, question, { onStatus, skipWarmup = false } = {}) {
+export async function analyzeAudio(
+  file,
+  question,
+  { onStatus, skipWarmup = false, language = "" } = {}
+) {
   if (!skipWarmup) {
     await waitForModelsReady({ onStatus, timeoutMs: 180_000 });
   }
@@ -129,6 +133,7 @@ export async function analyzeAudio(file, question, { onStatus, skipWarmup = fals
   const form = new FormData();
   form.append("file", uploadFile);
   form.append("question", question || "What can be inferred from the audio?");
+  if (language) form.append("language", language);
 
   onStatus?.("analyzing");
 

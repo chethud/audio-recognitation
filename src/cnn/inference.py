@@ -46,12 +46,6 @@ def _top_k_from_logits(
         if score < threshold:
             continue
         out.append({"label": str(class_names[idx]), "score": round(float(score), 4)})
-    # Quick-trained CNN may score below threshold — still return top hits.
-    if not out:
-        for score, idx in zip(values.tolist(), indices.tolist()):
-            if score < 0.03:
-                break
-            out.append({"label": str(class_names[idx]), "score": round(float(score), 4)})
     return out
 
 

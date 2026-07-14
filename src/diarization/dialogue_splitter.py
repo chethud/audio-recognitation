@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from typing import Any
 
-# Addressing "Mrs. Roy" -> Person 1 (neighbor A); "Mrs. Gupta" -> Person 2 (neighbor B)
+# Addressing "Mrs. Roy" -> Speaker 1 (neighbor A); "Mrs. Gupta" -> Speaker 2 (neighbor B)
 _ADDR_ROY = re.compile(r"\bmrs\.?\s*roy\b", re.I)
 _ADDR_GUPTA = re.compile(r"\bmrs\.?\s*gupt?a\b", re.I)
 _DIALOGUE_START = re.compile(
@@ -71,27 +71,27 @@ def _guess_speaker(
     dialogue_active: bool,
 ) -> str:
     if not in_dialogue:
-        return "Person 1"
+        return "Speaker 1"
 
     if _SELF_GUPTA.search(sentence):
-        return "Person 1"
+        return "Speaker 1"
     if _SELF_ROY.search(sentence):
-        return "Person 2"
+        return "Speaker 2"
     if _ADDR_ROY.search(sentence) and not _ADDR_GUPTA.search(sentence):
-        return "Person 1"
+        return "Speaker 1"
     if _ADDR_GUPTA.search(sentence) and not _ADDR_ROY.search(sentence):
-        return "Person 2"
+        return "Speaker 2"
 
     if dialogue_active and last and _SHORT_FOLLOWUP.match(sentence.strip()):
         return last
 
     if dialogue_active and last:
-        if last == "Person 1":
-            return "Person 2"
-        if last == "Person 2":
-            return "Person 1"
+        if last == "Speaker 1":
+            return "Speaker 2"
+        if last == "Speaker 2":
+            return "Speaker 1"
 
-    return "Person 1"
+    return "Speaker 1"
 
 
 def _merge_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -106,7 +106,7 @@ def _merge_turns(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 def split_dialogue_speakers(transcript: str) -> tuple[list[dict[str, Any]], str, int]:
     """
-    Split into Person 1 / Person 2 only for clear two-character scripted dialogue.
+    Split into Speaker 1 / Speaker 2 only for clear two-character scripted dialogue.
     Single-speaker monologue returns no speaker turns (plain transcript).
     """
     if not _has_strong_dialogue_cues(transcript):
@@ -162,5 +162,7 @@ def split_dialogue_speakers(transcript: str) -> tuple[list[dict[str, Any]], str,
     if len(speakers) < 2:
         return [], transcript, 0
 
-    formatted = "\n\n".join(f"{t['speaker']}: {t['text']}" for t in turns)
+    from src.diarization.transcript_formatter import format_conversation_transcript
+
+    formatted = format_conversation_transcript(turns)
     return turns, formatted, len(speakers)

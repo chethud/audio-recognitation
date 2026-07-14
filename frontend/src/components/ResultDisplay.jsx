@@ -30,6 +30,14 @@ function stripLanguageTag(text) {
   return (text || "").replace(/^\[[^\]]+\]\s*/, "").trim();
 }
 
+function formatTimestamp(sec) {
+  if (sec == null || Number.isNaN(Number(sec))) return "--:--.---";
+  const s = Math.max(0, Number(sec));
+  const minutes = Math.floor(s / 60);
+  const rem = s - minutes * 60;
+  return `${String(minutes).padStart(2, "0")}:${rem.toFixed(3).padStart(6, "0")}`;
+}
+
 export default function ResultDisplay({ result, error, loading }) {
   if (error) {
     return <div className="glass-error">{error}</div>;
@@ -68,7 +76,7 @@ export default function ResultDisplay({ result, error, loading }) {
         </div>
         <p className="text-slate-500 text-sm">
           Upload audio and click <span className="text-slate-400">Analyze</span>{" "}
-          to see transcript, sounds, emotion, and AI answer here.
+          to see transcript, sounds, emotion, and summary here.
         </p>
       </div>
     );
@@ -81,12 +89,15 @@ export default function ResultDisplay({ result, error, loading }) {
     sound_details,
     emotion,
     answer,
+    summary,
     language,
     language_name,
     languages,
     language_names,
     speaker_turns,
     num_speakers,
+    detected_speakers,
+    formatted_transcript,
   } = result;
 
   const langTags =
@@ -99,8 +110,6 @@ export default function ResultDisplay({ result, error, loading }) {
   const detectedLabel = multiLang
     ? langTags.join(", ")
     : language_name || languageLabel(language);
-  const answerLang =
-    multiLang || (language && language !== "en") ? detectedLabel : null;
 
   const soundItems =
     sound_details && sound_details.length > 0
@@ -108,30 +117,41 @@ export default function ResultDisplay({ result, error, loading }) {
       : (sounds || []).map((label) => ({ label, score: null }));
 
   const turns = speaker_turns || [];
-  const speakerCount = new Set(turns.map((t) => t.speaker)).size;
-  const multiSpeaker = num_speakers >= 2 && speakerCount >= 2 && turns.length > 0;
+  const speakersFromTurns = [];
+  for (const t of turns) {
+    const sp = (t.speaker || "").trim();
+    if (sp && !speakersFromTurns.includes(sp)) speakersFromTurns.push(sp);
+  }
+  const speakers =
+    detected_speakers && detected_speakers.length > 0
+      ? detected_speakers
+      : speakersFromTurns;
+
+  const hasTurns = turns.length > 0;
+  const emotionLabel = (emotion || "neutral").trim() || "neutral";
+  const summaryText = (summary || answer || "").trim() || "—";
 
   const originalText = stripLanguageTag(transcript_original || "");
   const englishText = (transcript || "").trim();
   const nonEnglish =
     !englishOnly && language && language !== "en" && language !== "multi";
-  const showOriginalFirst = nonEnglish && originalText.length > 0;
-  const mainTranscript = showOriginalFirst ? originalText : englishText || originalText;
-  const showEnglishBelow =
-    showOriginalFirst &&
-    englishText &&
-    englishText !== originalText &&
-    !multiSpeaker;
+  const showOriginalFirst = nonEnglish && originalText.length > 0 && !hasTurns;
+  const mainTranscript = showOriginalFirst
+    ? originalText
+    : englishText || originalText || formatted_transcript || "—";
 
-  const speakerBlocks = (
-    <div className="space-y-3">
+  const timedBlocks = (
+    <div className="space-y-4">
       {turns.map((t, i) => (
         <div
-          key={`${t.speaker}-${i}`}
+          key={`${t.speaker}-${t.start_sec}-${i}`}
           className="rounded-lg border border-violet-400/15 bg-violet-950/20 px-3 py-2.5"
         >
+          <p className="text-xs font-mono text-violet-300/80 mb-1">
+            [{formatTimestamp(t.start_sec)} - {formatTimestamp(t.end_sec)}]
+          </p>
           <p className="text-xs font-semibold text-violet-200/90 mb-1.5">
-            {t.speaker}
+            {t.speaker || "Speaker 1"}
           </p>
           <p className="text-slate-100 text-sm leading-relaxed whitespace-pre-wrap break-words">
             {t.text || "—"}
@@ -143,17 +163,32 @@ export default function ResultDisplay({ result, error, loading }) {
 
   const sections = [
     {
+      key: "speakers",
+      label: "Detected Speakers",
+      accent: "violet",
+      content: (
+        <ul className="list-disc list-inside space-y-1 text-slate-100 text-sm">
+          {(speakers.length > 0 ? speakers : ["Speaker 1"]).map((sp) => (
+            <li key={sp}>{sp}</li>
+          ))}
+        </ul>
+      ),
+    },
+    {
       key: "transcript",
-      label: multiSpeaker
-        ? `Transcript (${num_speakers || speakerCount} speakers)`
+      label: hasTurns
+        ? `Transcript (${num_speakers || speakers.length || turns.length} speaker${
+            (num_speakers || speakers.length || 1) === 1 ? "" : "s"
+          })`
         : englishOnly
           ? "Transcript"
           : `Transcript (${detectedLabel})`,
       accent: "violet",
-      highlight: multiSpeaker,
+      highlight: hasTurns,
+      full: true,
       content: (
         <>
-          {!englishOnly && !multiSpeaker && langTags.length > 0 ? (
+          {!englishOnly && !hasTurns && langTags.length > 0 ? (
             <div className="flex flex-wrap gap-1.5 mb-2">
               {langTags.map((name) => (
                 <span
@@ -165,35 +200,24 @@ export default function ResultDisplay({ result, error, loading }) {
               ))}
             </div>
           ) : null}
-          {multiSpeaker ? (
-            speakerBlocks
+          {hasTurns ? (
+            timedBlocks
           ) : (
             <p className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base break-words">
-              {mainTranscript || "—"}
+              {mainTranscript}
             </p>
           )}
-          {showEnglishBelow ? (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <p className="text-xs text-violet-300/70 mb-1">English translation</p>
-              <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
-                {englishText}
-              </p>
-            </div>
-          ) : null}
-          {multiLang && transcript_original && !multiSpeaker && !showOriginalFirst ? (
-            <div className="mt-3 pt-3 border-t border-white/10">
-              <p className="text-xs text-violet-300/70 mb-1">Original (by segment)</p>
-              <p className="text-slate-300 whitespace-pre-wrap leading-relaxed text-sm">
-                {transcript_original}
-              </p>
-            </div>
+              {hasTurns && language && language !== "en" && language !== "multi" ? (
+            <p className="mt-2 text-xs text-violet-300/70">
+              Language: {detectedLabel}
+            </p>
           ) : null}
         </>
       ),
     },
     {
       key: "sounds",
-      label: `Detected sounds${soundItems.length ? ` (${soundItems.length})` : ""}`,
+      label: `Detected Sounds${soundItems.length ? ` (${soundItems.length})` : ""}`,
       accent: "violet",
       content: (
         <div className="flex flex-wrap gap-2">
@@ -216,22 +240,28 @@ export default function ResultDisplay({ result, error, loading }) {
     },
     {
       key: "emotion",
-      label: "Speaker emotion",
+      label: "Speaker Emotion",
       accent: "violet",
       content: (
-        <p className="text-slate-100 capitalize text-sm sm:text-base">
-          {emotion || "—"}
-        </p>
+        <div className="space-y-3 text-sm sm:text-base">
+          {(speakers.length > 0 ? speakers : ["Speaker 1"]).map((sp) => (
+            <div key={sp}>
+              <p className="text-violet-200/90 font-semibold mb-0.5">{sp}:</p>
+              <p className="text-slate-100 capitalize">{emotionLabel}</p>
+            </div>
+          ))}
+        </div>
       ),
     },
     {
-      key: "answer",
-      label: answerLang ? `AI answer (${answerLang})` : "AI answer",
+      key: "summary",
+      label: "Conversation Summary",
       accent: "fuchsia",
       highlight: true,
+      full: true,
       content: (
         <div className="text-slate-100 whitespace-pre-wrap leading-relaxed text-sm sm:text-base border-l-2 border-fuchsia-400/45 pl-4 space-y-2">
-          {(answer || "—")
+          {summaryText
             .split("\n")
             .filter(Boolean)
             .map((line) => (
@@ -248,7 +278,9 @@ export default function ResultDisplay({ result, error, loading }) {
         <section
           key={s.key}
           className={`glass-panel-subtle p-4 ${
-            s.highlight || s.key === "answer" ? "sm:col-span-2 border-fuchsia-400/20" : ""
+            s.full || s.highlight || s.key === "summary"
+              ? "sm:col-span-2 border-fuchsia-400/20"
+              : ""
           } ${s.key === "transcript" && s.highlight ? "border-violet-400/20" : ""}`}
         >
           <h3
