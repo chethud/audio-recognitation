@@ -13,6 +13,8 @@ export default function UploadAudio({
   onSubmit,
   loading,
   loadingStage = "",
+  loadingProgress = 0,
+  timeRemaining = null,
   disabled,
   language = "en",
   onLanguageChange,
@@ -36,6 +38,8 @@ export default function UploadAudio({
     const dropped = e.dataTransfer.files?.[0];
     if (dropped) onFileChange(dropped);
   }
+
+  const pct = Math.round(Math.min(100, Math.max(0, loadingProgress)));
 
   return (
     <div className="space-y-5">
@@ -152,19 +156,46 @@ export default function UploadAudio({
         type="button"
         onClick={onSubmit}
         disabled={disabled || loading || !file}
-        className="glass-btn w-full"
+        className="glass-btn w-full overflow-hidden relative"
       >
         {loading ? (
-          <span className="inline-flex flex-col items-center justify-center gap-1">
-            <span className="inline-flex items-center gap-2">
-              <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin" />
-              Analyzing…
+          <span className="flex flex-col items-center gap-1.5 w-full py-0.5">
+            {/* Top row: spinner + "Analyzing…" + percentage and remaining time badges */}
+            <span className="flex items-center gap-2 w-full justify-center">
+              <span className="h-4 w-4 rounded-full border-2 border-white/30 border-t-white animate-spin shrink-0" />
+              <span className="font-semibold tracking-wide">Analyzing…</span>
+              <span className="ml-1 rounded-full bg-white/15 px-2 py-0.5 text-xs font-bold tabular-nums text-violet-100 border border-white/20">
+                {pct}%
+              </span>
+              {timeRemaining !== null ? (
+                <span className="text-[10px] uppercase font-bold text-violet-200/90 tracking-wider">
+                  {timeRemaining <= 2 ? "almost done" : `~${timeRemaining}s left`}
+                </span>
+              ) : null}
             </span>
+
+            {/* Stage description */}
             {loadingStage ? (
-              <span className="text-xs font-normal text-violet-100/85">
+              <span className="text-xs font-normal text-violet-100/75 text-center leading-tight px-2">
                 {loadingStage}
               </span>
             ) : null}
+
+            {/* Progress bar */}
+            <span className="w-full mt-0.5 block px-0.5">
+              <span className="flex items-center gap-2">
+                <span className="flex-1 block rounded-full bg-white/10 h-2 overflow-hidden">
+                  <span
+                    className="block h-full rounded-full bg-gradient-to-r from-violet-400 via-fuchsia-400 to-pink-400"
+                    style={{
+                      width: `${pct}%`,
+                      transition: "width 0.35s ease-out",
+                      boxShadow: "0 0 8px rgba(167,139,250,0.6)",
+                    }}
+                  />
+                </span>
+              </span>
+            </span>
           </span>
         ) : (
           "Run analysis"

@@ -169,7 +169,14 @@ def run_alm_lite(
             if sed_enabled:
                 from src.cnn.loader import should_use_cnn
 
-                if should_use_cnn() and str(sed_backend).lower() in ("auto", "cnn"):
+                configured_backend = str(sed_backend).lower()
+                if should_use_cnn() and configured_backend in ("auto", "cnn"):
+                    # Pure CNN only when explicitly configured or auto without AST.
+                    sed_backend = "cnn"
+                elif configured_backend in ("hybrid", "both"):
+                    # Hybrid allowed — CNN + AST gives much better detection coverage.
+                    sed_backend = "hybrid"
+                elif should_use_cnn():
                     sed_backend = "cnn"
                 else:
                     # No local CNN weights → leave SED off rather than loading AST.

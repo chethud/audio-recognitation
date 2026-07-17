@@ -17,9 +17,19 @@ export default function Home() {
   );
   const [loading, setLoading] = useState(false);
   const [loadingStage, setLoadingStage] = useState("");
+  const [loadingProgress, setLoadingProgress] = useState(0);
+  const [timeRemaining, setTimeRemaining] = useState(null);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [apiStatus, setApiStatus] = useState("checking");
+
+  // Stage definitions: label + the % range this stage occupies
+  const STAGES = [
+    { label: "Uploading audio…",                              min: 0,  max: 18 },
+    { label: "Transcribing speech (long files take a few minutes)…", min: 18, max: 62 },
+    { label: "Detecting sounds and emotion…",                 min: 62, max: 82 },
+    { label: "Building answer…",                              min: 82, max: 101 },
+  ];
 
   useEffect(() => {
     if (loading) return undefined;
@@ -50,18 +60,44 @@ export default function Home() {
     setLoading(true);
     setError(null);
     setResult(null);
-    const stages = [
-      "Uploading audio…",
-      "Transcribing speech (long files take a few minutes)…",
-      "Detecting sounds and emotion…",
-      "Building answer…",
-    ];
-    let i = 0;
-    setLoadingStage(stages[0]);
+    setLoadingProgress(0);
+    setTimeRemaining(null);
+
+    // Heuristic: estimate baseline of 16s + 8s per MB of audio file
+    const fileSizeMB = file.size / (1024 * 1024);
+    const totalEst = Math.max(16, Math.min(180, Math.round(16 + fileSizeMB * 8)));
+
+    let elapsedMs = 0;
+    const intervalMs = 250;
+
+    setLoadingStage(STAGES[0].label);
+
+    // Single unified interval for smooth progress and remaining time
     const timer = setInterval(() => {
-      i = (i + 1) % stages.length;
-      setLoadingStage(stages[i]);
-    }, 4000);
+      elapsedMs += intervalMs;
+      const elapsedSec = elapsedMs / 1000;
+
+      // Use a smooth asymptotic curve so progress never gets stuck or goes backwards,
+      // creeping slowly towards 96% if the server is taking longer than expected.
+      setLoadingProgress((prev) => {
+        if (prev >= 96) return 96;
+        const ratio = elapsedSec / totalEst;
+        const target = 96 * (1 - Math.exp(-1.8 * ratio));
+        const nextVal = Math.max(prev + 0.05, target);
+
+        // Update stage label based on current progress percentage
+        const currentStage = STAGES.find(s => nextVal >= s.min && nextVal <= s.max) || STAGES[STAGES.length - 1];
+        setLoadingStage(currentStage.label);
+
+        return nextVal;
+      });
+
+      // Update remaining time estimate
+      setTimeRemaining(() => {
+        return Math.max(1, Math.round(totalEst - elapsedSec));
+      });
+    }, intervalMs);
+
     try {
       const data = await analyzeAudio(file, question, {
         language,
@@ -74,6 +110,8 @@ export default function Home() {
         },
       });
       setApiStatus("ready");
+      setLoadingProgress(100);
+      setTimeRemaining(0);
       setResult(data);
     } catch (e) {
       const d = e?.response?.data?.detail;
@@ -90,6 +128,8 @@ export default function Home() {
     } finally {
       clearInterval(timer);
       setLoadingStage("");
+      setLoadingProgress(0);
+      setTimeRemaining(null);
       setLoading(false);
     }
   }
@@ -154,6 +194,8 @@ export default function Home() {
                 onSubmit={handleSubmit}
                 loading={loading}
                 loadingStage={loadingStage}
+                loadingProgress={loadingProgress}
+                timeRemaining={timeRemaining}
                 disabled={loading}
               />
             </div>
@@ -163,7 +205,14 @@ export default function Home() {
                 <span className="step-badge step-badge-lg step-badge-accent">2</span>
                 Analysis results
               </h2>
-              <ResultDisplay result={result} error={error} loading={loading} />
+              <ResultDisplay
+                result={result}
+                error={error}
+                loading={loading}
+                loadingStage={loadingStage}
+                loadingProgress={loadingProgress}
+                timeRemaining={timeRemaining}
+              />
             </div>
           </div>
         </div>

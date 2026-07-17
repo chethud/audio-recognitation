@@ -150,10 +150,12 @@ def _worker_env(
         "HF_HUB_DISABLE_PROGRESS_BARS": "1",
         "TRANSFORMERS_VERBOSITY": "error",
         "TOKENIZERS_PARALLELISM": "false",
-        "OMP_NUM_THREADS": "1",
-        "MKL_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1",
-        "NUMEXPR_NUM_THREADS": "1",
+        "OMP_NUM_THREADS": "2",
+        "MKL_NUM_THREADS": "2",
+        "OPENBLAS_NUM_THREADS": "2",
+        "NUMEXPR_NUM_THREADS": "2",
+        "PYTHONIOENCODING": "utf-8",
+        "PYTHONUTF8": "1",
         "ALM_ASR_LANGUAGE": (language or "").strip(),
         "ALM_UPLOAD_NAME": (upload_name or "").strip(),
         "ALM_TEMP_NAME": (temp_name or "").strip(),
@@ -161,8 +163,8 @@ def _worker_env(
         "ALM_AUDIO_BYTES": str(int(audio_bytes) if audio_bytes is not None else ""),
         # No transcript/result memoization. Model weights may stay in memory.
         "ALM_DISABLE_TRANSCRIPT_CACHE": "1",
-        # CT2/faster-whisper OOMs then poisons the HF Whisper stage on Windows.
-        "ALM_ENABLE_CT2": os.environ.get("ALM_ENABLE_CT2", "0"),
+        # Enable CTranslate2 (faster-whisper) for stable, fast Kannada CPU ASR in the worker.
+        "ALM_ENABLE_CT2": os.environ.get("ALM_ENABLE_CT2", "1"),
     }
     ffmpeg = os.environ.get("IMAGEIO_FFMPEG_EXE", "").strip()
     if not ffmpeg:
@@ -220,12 +222,17 @@ def _run_worker(
     if not script_path.exists():
         return {"ok": False, "error": f"Worker script not found: {script_path}"}
     try:
-        result = subprocess.run(
+        import threading
+        import time
+
+        process = subprocess.Popen(
             [sys.executable, str(script_path), audio_path, output_path, "--question-file", question_file],
             cwd=str(BASE),
-            capture_output=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
             text=True,
-            timeout=INFERENCE_TIMEOUT_SEC,
+            encoding="utf-8",
+            errors="replace",
             env=_worker_env(
                 language,
                 upload_name=upload_name,
@@ -234,13 +241,62 @@ def _run_worker(
                 audio_bytes=audio_bytes,
             ),
         )
+
+        stdout_lines = []
+        stderr_lines = []
+
+        def read_stream(stream, lines, stream_type):
+            try:
+                for line in stream:
+                    lines.append(line)
+                    text = f"[worker-{stream_type}] {line}"
+                    if stream_type == "stderr":
+                        try:
+                            sys.stderr.write(text)
+                            sys.stderr.flush()
+                        except UnicodeEncodeError:
+                            sys.stderr.write(text.encode("ascii", "replace").decode("ascii"))
+                            sys.stderr.flush()
+                    else:
+                        try:
+                            sys.stdout.write(text)
+                            sys.stdout.flush()
+                        except UnicodeEncodeError:
+                            sys.stdout.write(text.encode("ascii", "replace").decode("ascii"))
+                            sys.stdout.flush()
+            except Exception:
+                pass
+
+        t_out = threading.Thread(target=read_stream, args=(process.stdout, stdout_lines, "stdout"))
+        t_err = threading.Thread(target=read_stream, args=(process.stderr, stderr_lines, "stderr"))
+        t_out.daemon = True
+        t_err.daemon = True
+        t_out.start()
+        t_err.start()
+
+        start_time = time.time()
+        while process.poll() is None:
+            if time.time() - start_time > INFERENCE_TIMEOUT_SEC:
+                process.kill()
+                t_out.join(timeout=1.0)
+                t_err.join(timeout=1.0)
+                raise subprocess.TimeoutExpired(process.args, INFERENCE_TIMEOUT_SEC)
+            time.sleep(0.2)
+
+        t_out.join(timeout=2.0)
+        t_err.join(timeout=2.0)
+
+        stdout = "".join(stdout_lines)
+        stderr = "".join(stderr_lines)
+        returncode = process.returncode
+
         # Native crash (access violation) => no output file / non-zero return
-        if result.returncode != 0 and not Path(output_path).exists():
-            detail = _clean_worker_stderr(result.stderr or "")
+        if returncode != 0 and not Path(output_path).exists():
+            detail = _clean_worker_stderr(stderr or "")
             return {
                 "ok": False,
                 "error": (
-                    f"Inference worker crashed (exit {result.returncode}). "
+                    f"Inference worker crashed (exit {returncode}). "
                     f"Try again, or pick English/Kannada explicitly."
                     + (f" {detail}" if detail else "")
                 ).strip(),
@@ -248,11 +304,11 @@ def _run_worker(
         if Path(output_path).exists():
             data = json.loads(Path(output_path).read_text(encoding="utf-8"))
         else:
-            stderr = (result.stderr or "").strip()
-            stdout = (result.stdout or "").strip()
-            err = stderr or stdout or "Worker produced no output file (possible crash during startup)"
-            if stderr and stdout:
-                err = f"{err}\n[stdout: {stdout[:200]}]"
+            stderr_cleaned = (stderr or "").strip()
+            stdout_cleaned = (stdout or "").strip()
+            err = stderr_cleaned or stdout_cleaned or "Worker produced no output file (possible crash during startup)"
+            if stderr_cleaned and stdout_cleaned:
+                err = f"{err}\n[stdout: {stdout_cleaned[:200]}]"
             return {"ok": False, "error": err[:800]}
         if not data.get("ok"):
             return {"ok": False, "error": data.get("error", "Unknown worker error")}

@@ -27,13 +27,14 @@ DEFAULT_OUT = BASE / "outputs" / "sed_cnn.pt"
 class ESC50MelDataset(Dataset):
     """HF ESC-50 rows -> fixed-size log-mel tensors."""
 
-    def __init__(self, hf_ds, indices, n_mels: int, target_frames: int, label_ids, center_crop: bool = False):
+    def __init__(self, hf_ds, indices, n_mels: int, target_frames: int, label_ids, center_crop: bool = False, target_sr: int = 16000):
         self.ds = hf_ds
         self.indices = indices
         self.n_mels = n_mels
         self.target_frames = target_frames
         self.label_ids = label_ids
         self.center_crop = center_crop
+        self.target_sr = target_sr
 
     def __len__(self) -> int:
         return len(self.indices)
@@ -68,6 +69,10 @@ class ESC50MelDataset(Dataset):
         row = self.ds[self.indices[i]]
         audio = row["audio"]
         wav, sr = self._load_wav(audio)
+        if sr != self.target_sr:
+            import librosa
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=self.target_sr)
+            sr = self.target_sr
         mel = waveform_to_mel(wav, sr, n_mels=self.n_mels)
         mel = pad_or_crop_time(mel, self.target_frames, center=self.center_crop)
         t = torch.from_numpy(mel).unsqueeze(0)

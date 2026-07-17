@@ -49,10 +49,10 @@ alm_lite:
     vad_min_silence_sec: 0.25
   sed:
     enabled: true
-    backend: cnn   # local SED CNN only (AST/hybrid crash-prone on Windows with Whisper)
+    backend: hybrid   # hybrid = local CNN (ESC-50) + HuggingFace AST (527 AudioSet classes)
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
     top_k: 10
-    threshold: 0.12   # CNN ESC-50 softmax; ignore near-uniform junk scores
+    threshold: 0.08   # lower threshold so weaker real sounds (dog bark, etc.) pass through
     segment_sec: 2.5
     max_windows: 16
     max_results: 12

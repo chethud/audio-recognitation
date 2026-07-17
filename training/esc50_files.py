@@ -27,11 +27,13 @@ class Esc50FileMelDataset(Dataset):
         n_mels: int,
         time_frames: int,
         center_crop: bool = False,
+        target_sr: int = 16000,
     ):
         self.rows = rows
         self.n_mels = n_mels
         self.time_frames = time_frames
         self.center_crop = center_crop
+        self.target_sr = target_sr
 
     def __len__(self) -> int:
         return len(self.rows)
@@ -44,6 +46,10 @@ class Esc50FileMelDataset(Dataset):
         if isinstance(wav, np.ndarray) and wav.ndim > 1:
             wav = np.mean(wav, axis=1)
         wav = wav.astype(np.float32)
+        if sr != self.target_sr:
+            import librosa
+            wav = librosa.resample(wav, orig_sr=sr, target_sr=self.target_sr)
+            sr = self.target_sr
         mel = waveform_to_mel(wav, int(sr), n_mels=self.n_mels)
         mel = pad_or_crop_time(mel, self.time_frames, center=self.center_crop)
         t = torch.from_numpy(mel).unsqueeze(0)

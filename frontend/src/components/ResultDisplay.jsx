@@ -38,19 +38,105 @@ function formatTimestamp(sec) {
   return `${String(minutes).padStart(2, "0")}:${rem.toFixed(3).padStart(6, "0")}`;
 }
 
-export default function ResultDisplay({ result, error, loading }) {
+export default function ResultDisplay({
+  result,
+  error,
+  loading,
+  loadingStage = "",
+  loadingProgress = 0,
+  timeRemaining = null,
+}) {
   if (error) {
     return <div className="glass-error">{error}</div>;
   }
 
   if (loading) {
+    const pct = Math.round(Math.min(100, Math.max(0, loadingProgress)));
+
+    const steps = [
+      { label: "Upload",      min: 0,  max: 18 },
+      { label: "Transcribe",  min: 18, max: 62 },
+      { label: "Detect",      min: 62, max: 82 },
+      { label: "Answer",      min: 82, max: 100 },
+    ];
+    const activeStep = steps.findIndex((s, i) => {
+      const next = steps[i + 1];
+      return pct >= s.min && (!next || pct < next.min);
+    });
+
     return (
-      <div className="glass-panel-subtle px-4 py-10 text-center">
-        <span className="inline-block h-8 w-8 rounded-full border-2 border-violet-400/30 border-t-violet-300 animate-spin mb-3" />
-        <p className="text-slate-400 text-sm">Running full analysis…</p>
-        <p className="text-slate-500 text-xs mt-2">
-          Long audio can take 3–8 minutes. Keep this tab open.
-        </p>
+      <div className="glass-panel-subtle px-5 py-8 flex flex-col items-center gap-5">
+        {/* Spinning ring + percentage circle */}
+        <div className="relative flex items-center justify-center">
+          <svg className="w-20 h-20 -rotate-90" viewBox="0 0 64 64">
+            <circle cx="32" cy="32" r="26" fill="none" stroke="rgba(255,255,255,0.07)" strokeWidth="5" />
+            <circle
+              cx="32" cy="32" r="26"
+              fill="none"
+              stroke="url(#prog-grad)"
+              strokeWidth="5"
+              strokeLinecap="round"
+              strokeDasharray={`${2 * Math.PI * 26}`}
+              strokeDashoffset={`${2 * Math.PI * 26 * (1 - pct / 100)}`}
+              style={{ transition: "stroke-dashoffset 0.35s ease-out" }}
+            />
+            <defs>
+              <linearGradient id="prog-grad" x1="0%" y1="0%" x2="100%" y2="0%">
+                <stop offset="0%" stopColor="#a78bfa" />
+                <stop offset="100%" stopColor="#f0abfc" />
+              </linearGradient>
+            </defs>
+          </svg>
+          <span className="absolute text-lg font-bold tabular-nums text-white">{pct}%</span>
+        </div>
+
+        {/* Stage label */}
+        <div className="text-center">
+          <p className="text-sm font-semibold text-slate-200">
+            {loadingStage || "Running full analysis…"}
+          </p>
+          <p className="text-xs text-violet-300 font-medium mt-1">
+            {timeRemaining !== null
+              ? timeRemaining <= 2
+                ? "Finishing up analysis details…"
+                : `Estimated remaining time: ~${timeRemaining} seconds`
+              : "Preparing analysis parameters…"}
+          </p>
+        </div>
+
+        {/* Step pills */}
+        <div className="flex items-center gap-1 flex-wrap justify-center">
+          {steps.map((step, i) => {
+            const done = pct >= step.max;
+            const active = i === activeStep;
+            return (
+              <span
+                key={step.label}
+                className={`px-2.5 py-0.5 rounded-full text-xs font-medium border transition-all ${
+                  done
+                    ? "bg-violet-500/30 border-violet-400/50 text-violet-200"
+                    : active
+                    ? "bg-fuchsia-500/20 border-fuchsia-400/50 text-fuchsia-200 animate-pulse"
+                    : "bg-white/5 border-white/10 text-slate-500"
+                }`}
+              >
+                {done ? "✓ " : active ? "⟳ " : ""}{step.label}
+              </span>
+            );
+          })}
+        </div>
+
+        {/* Linear progress bar */}
+        <div className="w-full rounded-full bg-white/8 h-1.5 overflow-hidden">
+          <div
+            className="h-full rounded-full bg-gradient-to-r from-violet-400 to-fuchsia-400"
+            style={{
+              width: `${pct}%`,
+              transition: "width 0.35s ease-out",
+              boxShadow: "0 0 10px rgba(167,139,250,0.5)",
+            }}
+          />
+        </div>
       </div>
     );
   }

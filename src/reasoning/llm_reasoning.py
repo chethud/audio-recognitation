@@ -84,11 +84,16 @@ def answer_from_context_fast(
     lang = (language or "en").lower()
     langs = languages or []
     sounds = sound_labels or []
-    speech = (transcript or "").strip()
+    # Use transcript (English) for speech check; fall back to transcript_original
+    # (Kannada / other Indic scripts) so we never report "no speech" when only
+    # the native-script field is non-empty (Kannada fine-tunes don't translate).
+    speech_en = (transcript or "").strip()
+    speech_orig = (transcript_original or "").strip()
+    speech = speech_en or speech_orig
     emo = (emotion or "neutral").strip().capitalize()
     turns = speaker_turns or []
 
-    has_speech = is_meaningful_speech(speech)
+    has_speech = is_meaningful_speech(speech_en) or is_meaningful_speech(speech_orig)
     has_sounds = bool(sounds)
 
     if not has_speech and not has_sounds:
@@ -107,9 +112,13 @@ def answer_from_context_fast(
             if text:
                 lines.append(f"  {who}: {text}")
     elif has_speech:
-        display = speech
-        if (lang != "en" or lang == "multi" or len(langs) > 1) and transcript_original.strip():
-            display = transcript_original.strip()
+        # For non-English languages, prefer the original-script transcript.
+        # Kannada fine-tune models output native script in both transcript and
+        # transcript_original; the English translation field may be empty.
+        if (lang != "en" or lang == "multi" or len(langs) > 1) and speech_orig:
+            display = speech_orig
+        else:
+            display = speech_en or speech_orig
         lines.append(f'Speech heard: "{display}"')
     elif "[vocalization]" in speech or speech:
         lines.append("Non-speech vocalizations are present (e.g. barking or background noise).")

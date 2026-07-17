@@ -62,8 +62,9 @@ def main():
         import yaml
 
         try:
-            torch.set_num_threads(1)
-            torch.set_num_interop_threads(1)
+            threads = min(4, max(1, (os.cpu_count() or 4) // 2))
+            torch.set_num_threads(threads)
+            torch.set_num_interop_threads(threads)
         except Exception:
             pass
 

@@ -26,6 +26,18 @@ def _ensure_ffmpeg_on_path() -> None:
 
 
 def configure_ml_env() -> None:
+    # Programmatically force HuggingFace to use the local project cache folder where models are pre-downloaded.
+    # This prevents internet connection attempts and ensures offline model loading works correctly.
+    src_dir = Path(__file__).resolve().parent
+    workspace_root = src_dir.parent
+    local_hf_cache = workspace_root / ".cache" / "huggingface"
+    
+    # Always set these so offline mode works regardless of shell env
+    os.environ["HF_HOME"] = str(local_hf_cache)
+    os.environ["HF_HUB_CACHE"] = str(local_hf_cache / "hub")
+    os.environ["HF_HUB_OFFLINE"] = "1"
+    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+
     os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
     os.environ.setdefault("USE_TF", "0")
     os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "3")

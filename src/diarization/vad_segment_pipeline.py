@@ -103,8 +103,51 @@ def _mfcc_embedding(wav: np.ndarray, sample_rate: int) -> np.ndarray:
     if len(wav) < sample_rate // 10:
         wav = np.pad(wav, (0, sample_rate // 10 - len(wav)))
     mfcc = librosa.feature.mfcc(y=wav, sr=sample_rate, n_mfcc=20)
-    # mean + std over time
-    return np.concatenate([mfcc.mean(axis=1), mfcc.std(axis=1)]).astype(np.float32)
+    feats = [mfcc.mean(axis=1), mfcc.std(axis=1)]
+    # Pitch stats — the strongest voice-identity cue (e.g. male vs female median f0).
+    try:
+        f0 = librosa.yin(
+            np.asarray(wav, dtype=np.float32),
+            fmin=65,
+            fmax=400,
+            sr=sample_rate,
+            frame_length=1024,
+        )
+        voiced = f0[(f0 > 66.0) & (f0 < 399.0)]
+        if voiced.size >= 3:
+            logf0 = np.log(voiced)
+            feats.append(
+                np.array(
+                    [logf0.mean(), logf0.std(), voiced.size / max(f0.size, 1)],
+                    dtype=np.float32,
+                )
+            )
+        else:
+            feats.append(np.zeros(3, dtype=np.float32))
+    except Exception:
+        feats.append(np.zeros(3, dtype=np.float32))
+    return np.concatenate(feats).astype(np.float32)
+
+
+def _normalize_embeddings(X: np.ndarray) -> np.ndarray:
+    """
+    Z-score each feature across regions, then L2-normalize.
+
+    Raw MFCC coefficient 0 (energy) is ~2 orders of magnitude larger than the
+    voice-identity features, so plain L2 cosine distance reduced to a loudness
+    comparison and two-speaker interviews clustered as one speaker.
+    """
+    X = np.asarray(X, dtype=np.float32)
+    if X.ndim != 2 or X.shape[0] == 0:
+        return X
+    mu = X.mean(axis=0, keepdims=True)
+    sd = X.std(axis=0, keepdims=True) + 1e-6
+    Z = (X - mu) / sd
+    # Pitch dims (last 3) are the strongest speaker cue — give them extra weight.
+    if Z.shape[1] >= 43:
+        Z[:, -3:] *= 3.0
+    norms = np.linalg.norm(Z, axis=1, keepdims=True) + 1e-8
+    return (Z / norms).astype(np.float32)
 
 
 def _speech_mask_from_regions(
@@ -167,10 +210,8 @@ def _window_embeddings(
                 spans.append((pos / sample_rate, e0 / sample_rate))
 
     if not embeds:
-        return np.zeros((0, 40), dtype=np.float32), []
-    X = np.stack(embeds, axis=0)
-    norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-8
-    return (X / norms).astype(np.float32), spans
+        return np.zeros((0, 43), dtype=np.float32), []
+    return _normalize_embeddings(np.stack(embeds, axis=0)), spans
 
 
 def _is_kannada_language(language: str | None) -> bool:
@@ -206,11 +247,11 @@ def _cluster_labels(
         return [0] * n
 
     # Kannada: prefer single-speaker unless separation is very clear.
-    sil_accept = 0.28 if strict_single else 0.12
-    minority_accept = 0.32 if strict_single else 0.25
-    switch_accept = 0.35 if strict_single else 0.22
-    sil_keep_multi = 0.22 if strict_single else 0.08
-    minority_keep = 0.30 if strict_single else 0.2
+    sil_accept = 0.28 if strict_single else 0.08
+    minority_accept = 0.32 if strict_single else 0.08
+    switch_accept = 0.35 if strict_single else 0.15
+    sil_keep_multi = 0.22 if strict_single else 0.06
+    minority_keep = 0.30 if strict_single else 0.06
 
     def _fit(k: int) -> list[int]:
         kwargs = {"n_clusters": k, "linkage": "average"}
@@ -358,9 +399,7 @@ def _label_speakers_mfcc(
             embeds.append(_mfcc_embedding(wav[s:e], sample_rate))
             kept_regions.append((start, end))
         if len(kept_regions) >= 3:
-            X = np.stack(embeds, axis=0)
-            norms = np.linalg.norm(X, axis=1, keepdims=True) + 1e-8
-            X = (X / norms).astype(np.float32)
+            X = _normalize_embeddings(np.stack(embeds, axis=0))
             labels = _cluster_labels(
                 X,
                 max_speakers=max_speakers,
@@ -734,7 +773,7 @@ def _transcribe_segments(
     from src.asr.whisper_asr import _get_asr_pipe, _run_whisper, _run_whisper_timestamped
 
     segs = _resolve_overlapping_segments(segs)
-    segs = _merge_same_speaker_segments(segs, gap_merge_sec=0.35)
+    segs = _merge_same_speaker_segments(segs, gap_merge_sec=1.0)
     if not segs:
         return []
 
@@ -867,7 +906,8 @@ def _transcribe_segments(
         ]
 
     # Multi-speaker: Kannada fine-tunes prefer per-segment (no reliable timestamps).
-    use_per_segment = _is_kannada_finetune(asr_model_id) or n_spk >= 2
+    # Other models support reliable timestamps, so we use single-pass timestamped ASR.
+    use_per_segment = _is_kannada_finetune(asr_model_id)
 
     phrases: list[tuple[str, tuple[float, float]]] = []
     if not use_per_segment:

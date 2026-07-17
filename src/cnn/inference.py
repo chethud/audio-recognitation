@@ -68,9 +68,9 @@ def predict_sed_cnn(
     *,
     sample_rate: int = 16000,
     top_k: int = 5,
-    threshold: float = 0.15,
-    segment_sec: float = 3.0,
-    max_windows: int = 2,
+    threshold: float = 0.08,
+    segment_sec: float = 2.5,
+    max_windows: int = 16,
 ) -> List[dict]:
     bundle = _load_sed_bundle()
     if bundle is None:

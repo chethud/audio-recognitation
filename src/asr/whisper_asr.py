@@ -282,11 +282,17 @@ def _run_whisper(
     if duration_s > 30 and not kannada_ft:
         pipe_kwargs = {"chunk_length_s": 30, "batch_size": 4, "stride_length_s": 5}
 
+    # Dynamically limit max new tokens for short segments to speed up CPU inference
+    # and prevent long-running hallucination loops on short segments.
+    max_tokens = 224
+    if duration_s < 28:
+        max_tokens = max(32, min(224, int(duration_s * 12)))
+
     gen_kwargs: dict = {
         "condition_on_prev_tokens": False,
         "do_sample": False,
         "temperature": 0.0,
-        "max_new_tokens": 224,
+        "max_new_tokens": max_tokens,
     }
     # Stock Whisper supports these; Kannada fine-tunes often lack no_timestamps_token_id
     # and crash if timestamp thresholds are passed.
@@ -638,6 +644,13 @@ def _transcribe_chunk(
             )
             return (english or original).strip(), original.strip(), lang or "en"
         return original.strip(), original.strip(), "en"
+
+    # Kannada fine-tune models are trained only for transcription, not translation.
+    # Calling task="translate" on them uses the same forced_decoder_ids and returns
+    # Kannada script again — identical to the transcription, just wasting compute.
+    # Skip translation and return the native-script text in both fields.
+    if _pipe_is_kannada_finetune(pipe) or lang == "kn":
+        return original.strip(), original.strip(), lang
 
     english = _run_whisper(
         pipe, chunk, sample_rate, task="translate", language_code=lang

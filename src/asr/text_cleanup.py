@@ -33,10 +33,8 @@ def is_low_quality_indic(text: str) -> bool:
     if "commission" in low or "subscribe" in low:
         return True
     kn = re.findall(r"[\u0C80-\u0CFF]", text)
-    # Very short Kannada snippets can still be valid ASR for short crops —
-    # only flag tiny fragments that are clearly empty of content.
-    if 0 < len(kn) < 4:
-        return True
+    # Only flag truly empty Kannada output (0 script chars) or obvious repetition.
+    # Short fragments (1-3 chars) are valid for brief clips — don't discard them.
     if len(kn) >= 8 and len(set(kn)) <= 3:
         return True
     return False
@@ -262,7 +260,9 @@ def is_meaningful_speech(text: str) -> bool:
     without_markers = t.replace("[vocalization]", "").strip()
     if len(without_markers) < 3:
         return False
-    if re.search(r"[A-Za-z\u0900-\u0D7F]{2,}", without_markers):
+    # Check for Latin or any Indic script character (Devanagari, Kannada, Tamil,
+    # Telugu, Malayalam, Bengali, Gujarati, Gurmukhi, Odia, etc.)
+    if re.search(r"[A-Za-z\u0900-\u0D7F\u0C80-\u0CFF]{2,}", without_markers):
         return True
     return len(without_markers) >= 4
 
