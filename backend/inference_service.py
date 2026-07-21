@@ -94,15 +94,23 @@ def warmup() -> None:
         import torch
 
         torch.set_grad_enabled(False)
+        from src.config_path import low_memory_mode
+
         if not torch.cuda.is_available():
-            threads = min(4, max(1, (os.cpu_count() or 4) // 2))
+            threads = 1 if low_memory_mode() else min(4, max(1, (os.cpu_count() or 4) // 2))
             torch.set_num_threads(threads)
+            try:
+                torch.set_num_interop_threads(1)
+            except Exception:
+                pass
 
         from src.asr.whisper_asr import _get_asr_pipe
 
         device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        cnn_sed = _sed_uses_cnn(cfg)
-        cnn_emo = _emotion_uses_cnn(cfg) and emo_cfg.get("enabled", True)
+        sed_on = bool(sed_cfg.get("enabled", True))
+        emo_on = bool(emo_cfg.get("enabled", True))
+        cnn_sed = sed_on and _sed_uses_cnn(cfg)
+        cnn_emo = emo_on and _emotion_uses_cnn(cfg)
         cnn_ready = False
         if cnn_sed or cnn_emo:
             from src.cnn import warmup_cnn
@@ -110,14 +118,16 @@ def warmup() -> None:
             cnn_ready = warmup_cnn(cfg)
 
         sed_backend = str(sed_cfg.get("backend", "auto")).lower()
-        skip_hf_sed = sed_backend == "cnn" and not cnn_ready
+        skip_hf_sed = (not sed_on) or (sed_backend == "cnn" and not cnn_ready)
 
         if fast:
-            if cnn_ready and cnn_sed and cnn_emo:
+            if not sed_on and not emo_on:
+                mode = "fast (ASR only)"
+            elif cnn_ready and cnn_sed and cnn_emo:
                 mode = "fast (ASR + hybrid SED + CNN emotion)"
             elif cnn_ready and cnn_sed:
                 mode = "fast (ASR + hybrid SED)"
-            elif skip_hf_sed or not sed_cfg.get("enabled", True):
+            elif skip_hf_sed or not sed_on:
                 mode = "fast (ASR only)"
             else:
                 mode = "fast (ASR + SED)"
@@ -127,7 +137,7 @@ def warmup() -> None:
 
         _get_asr_pipe(asr_cfg.get("model_id", "openai/whisper-tiny"), device)
 
-        if _needs_ast_sed(cfg) and not skip_hf_sed:
+        if sed_on and _needs_ast_sed(cfg) and not skip_hf_sed:
             try:
                 from src.sed.sed_module import _get_sed_pipe
 
@@ -137,11 +147,10 @@ def warmup() -> None:
                 )
             except Exception as exc:
                 logger.warning("HF SED warmup skipped: %s", exc)
-        elif skip_hf_sed:
+        elif sed_on and skip_hf_sed:
             logger.info(
                 "SED backend is cnn but checkpoints are missing — skipping HF AST download."
             )
-        emo_on = emo_cfg.get("enabled", True)
         if emo_on and not fast and not (cnn_ready and cnn_emo):
             from src.emotion.emotion_module import _get_emotion_pipeline
 

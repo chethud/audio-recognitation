@@ -84,9 +84,9 @@ CONFIG_PATH = resolve_config_path(BASE)
 WORKER_SCRIPT_MODULAR = BASE / "inference_worker_modular.py"
 
 # Limits (audio still capped by config data.max_audio_length_sec on Render)
-MAX_FILE_SIZE_MB = 80 if low_memory_mode() else 500
+MAX_FILE_SIZE_MB = 10 if low_memory_mode() else 500
 MAX_QUESTION_LEN = 1000
-INFERENCE_TIMEOUT_SEC = 900 if low_memory_mode() else 3600
+INFERENCE_TIMEOUT_SEC = 600 if low_memory_mode() else 3600
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".mp4", ".mkv", ".webm", ".avi", ".mov"}
 
 
@@ -332,10 +332,11 @@ def _use_subprocess_inference() -> bool:
         return True
     if env in ("0", "false", "no"):
         return False
-    # Default ON for Windows (native segfaults) and Render (OOM / cold start).
+    # Windows: subprocess avoids native segfaults taking down uvicorn.
     if sys.platform == "win32":
         return True
-    return os.getenv("RENDER", "").strip().lower() in ("1", "true", "yes")
+    # Render low-RAM: in-process (one copy of torch). Parent+child OOMs on Standard.
+    return False
 
 
 def _run_modular_inference(
@@ -363,10 +364,20 @@ def _run_modular_inference(
             audio_bytes=audio_bytes,
         )
     if not inference_service.is_ready():
-        raise HTTPException(
-            503,
-            "Models are still loading. Wait until /health returns model_ready=true, then retry.",
-        )
+        if low_memory_mode():
+            try:
+                logger.info("Low-memory: warming models for this request…")
+                inference_service.warmup()
+            except Exception as exc:
+                return {
+                    "ok": False,
+                    "error": f"Model load failed (low memory): {type(exc).__name__}: {exc}",
+                }
+        else:
+            raise HTTPException(
+                503,
+                "Models are still loading. Wait until /health returns model_ready=true, then retry.",
+            )
     # Propagate identity into in-process path (same env keys the worker uses).
     if upload_name:
         os.environ["ALM_UPLOAD_NAME"] = upload_name
@@ -438,6 +449,16 @@ def _mime_for_suffix(suffix: str) -> str:
 def startup():
     database.init_db()
     if _use_subprocess_inference():
+        logger.info("Subprocess inference enabled — models load per request in a worker.")
+        return
+
+    if low_memory_mode():
+        # Do not preload: keep idle RSS low. First /analyze calls warmup().
+        logger.info(
+            "Low-memory mode (%s): defer model load until first /analyze "
+            "(whisper-tiny / ASR-only).",
+            resolve_config_path(BASE).name,
+        )
         return
 
     def _warmup_background() -> None:
@@ -460,14 +481,29 @@ def root():
         "service": "ALM-Lite API",
         "health": "/health",
         "docs": "/docs",
-        "model_ready": inference_service.is_ready() or _use_subprocess_inference(),
+        "model_ready": _health_ready(),
+        "config": resolve_config_path(BASE).name if low_memory_mode() else "config.yaml",
     }
+
+
+def _health_ready() -> bool:
+    if _use_subprocess_inference():
+        return True
+    # Low-memory: ready to accept traffic; models load on first analyze.
+    if low_memory_mode():
+        return True
+    return inference_service.is_ready()
 
 
 @app.get("/health", response_model=HealthResponse)
 def health():
-    ready = inference_service.is_ready() or _use_subprocess_inference()
-    return HealthResponse(status="ok", model_ready=ready)
+    return HealthResponse(status="ok", model_ready=_health_ready())
+
+
+@app.head("/")
+def root_head():
+    """Render port probes sometimes use HEAD /."""
+    return Response(status_code=200)
 
 
 @app.post("/auth/signup", response_model=AuthResponse)

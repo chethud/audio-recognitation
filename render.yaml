@@ -24,13 +24,15 @@ services:
       - key: HF_HOME
         value: /app/.cache/huggingface
       - key: ALM_SUBPROCESS_INFERENCE
-        value: "1"
+        value: "0"
       - key: ALM_ENABLE_CT2
         value: "0"
       - key: ALM_LOW_MEMORY
         value: "1"
       - key: ALM_ALLOW_HF_DOWNLOAD
         value: "1"
+      - key: CUDA_VISIBLE_DEVICES
+        value: ""
       - key: OMP_NUM_THREADS
         value: "1"
       - key: MKL_NUM_THREADS

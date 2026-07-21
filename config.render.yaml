@@ -1,6 +1,6 @@
-# Lean ALM-Lite profile for Render Standard (~2 GB RAM).
+# Lean ALM-Lite profile for Render (~2 GB RAM or less).
 # Selected automatically when RENDER=true or ALM_LOW_MEMORY=1.
-# Keeps ASR + light SED; skips AST / emotion HF / LLM.
+# ASR-only (whisper-tiny) — SED/diarization disabled to avoid OOM.
 
 project:
   name: alm-audio-language-model
@@ -10,7 +10,7 @@ project:
 data:
   train_split: 0.9
   sample_rate: 16000
-  max_audio_length_sec: 45
+  max_audio_length_sec: 30
   train_json: data/train.jsonl
   val_json: data/val.jsonl
 
@@ -27,7 +27,7 @@ alm_lite:
     segment_sec: 30
     max_segments: 1
   diarization:
-    enabled: true
+    enabled: false
     backend: vad
     whisper_model: null
     min_switch_sec: 0.3
@@ -35,23 +35,23 @@ alm_lite:
     gap_merge_sec: 0.45
     batch_size: 4
     align_batch_size: 8
-    max_speakers: 4
+    max_speakers: 2
     window_sec: 1.2
     hop_sec: 0.6
     min_segment_sec: 0.5
     distance_threshold: 0.35
-    max_audio_sec: 45
+    max_audio_sec: 30
     vad_min_speech_sec: 0.25
     vad_min_silence_sec: 0.25
   sed:
-    enabled: true
+    enabled: false
     backend: cnn
     model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
-    top_k: 6
+    top_k: 5
     threshold: 0.1
     segment_sec: 2.5
-    max_windows: 8
-    max_results: 8
+    max_windows: 4
+    max_results: 5
   emotion:
     enabled: false
     backend: cnn
@@ -73,7 +73,7 @@ training:
   use_cpu: true
 
 alm_cnn:
-  use_in_inference: auto
+  use_in_inference: false
   sed_checkpoint: outputs/sed_cnn.pt
   emotion_checkpoint: outputs/emotion_cnn.pt
   merged_checkpoint: outputs/alm_cnn_merged.pt

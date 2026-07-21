@@ -86,7 +86,7 @@ Use **Python 3.11** (WhisperX does not support 3.14). The Docker image already u
 |-------|-----|
 | `requirements.txt` not found | Set **Root Directory** to empty (repo root), not `frontend` |
 | Python 3.14 on build | Set `PYTHON_VERSION=3.11.9` or use **Docker** runtime |
-| Render crash / OOM | Service auto-uses `config.render.yaml` (whisper-tiny, CNN SED only, 45s cap). Upgrade plan if still OOM. Set `ALM_LOW_MEMORY=1` in Render env. |
+| Render crash / OOM | Uses `config.render.yaml` (whisper-tiny, ASR-only, 30s). Set `ALM_SUBPROCESS_INFERENCE=0` and `ALM_LOW_MEMORY=1`. Upgrade plan if still OOM. Keep uploads short (&lt;10 MB). |
 | `model_ready: false` | Wait 3–5 min; check logs; ensure RAM enough |
 | No sounds | Run CNN training on Render or upload `outputs/*.pt` |
 | Vercel analyze fails | Set `VITE_API_BASE` correctly; redeploy after changing env |
