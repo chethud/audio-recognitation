@@ -328,8 +328,10 @@ def _use_subprocess_inference() -> bool:
         return True
     if env in ("0", "false", "no"):
         return False
-    # Default ON for Windows — Wav2Vec2/torch segfaults were taking down uvicorn.
-    return sys.platform == "win32"
+    # Default ON for Windows (native segfaults) and Render (OOM / cold start).
+    if sys.platform == "win32":
+        return True
+    return os.getenv("RENDER", "").strip().lower() in ("1", "true", "yes")
 
 
 def _run_modular_inference(
