@@ -1,0 +1,82 @@
+# Lean ALM-Lite profile for Render Standard (~2 GB RAM).
+# Selected automatically when RENDER=true or ALM_LOW_MEMORY=1.
+# Keeps ASR + light SED; skips AST / emotion HF / LLM.
+
+project:
+  name: alm-audio-language-model
+  output_dir: outputs
+  seed: 42
+
+data:
+  train_split: 0.9
+  sample_rate: 16000
+  max_audio_length_sec: 45
+  train_json: data/train.jsonl
+  val_json: data/val.jsonl
+
+alm_lite:
+  fast_mode: true
+  store_uploaded_audio: false
+  parallel_inference: false
+  asr:
+    model_id: "openai/whisper-tiny"
+    language_models:
+      kn: "vasista22/whisper-kannada-tiny"
+    language: null
+    preferred_languages: [en, kn, hi, ta, te, ml]
+    segment_sec: 30
+    max_segments: 1
+  diarization:
+    enabled: true
+    backend: vad
+    whisper_model: null
+    min_switch_sec: 0.3
+    min_confidence: 0.35
+    gap_merge_sec: 0.45
+    batch_size: 4
+    align_batch_size: 8
+    max_speakers: 4
+    window_sec: 1.2
+    hop_sec: 0.6
+    min_segment_sec: 0.5
+    distance_threshold: 0.35
+    max_audio_sec: 45
+    vad_min_speech_sec: 0.25
+    vad_min_silence_sec: 0.25
+  sed:
+    enabled: true
+    backend: cnn
+    model_id: "MIT/ast-finetuned-audioset-10-10-0.4593"
+    top_k: 6
+    threshold: 0.1
+    segment_sec: 2.5
+    max_windows: 8
+    max_results: 8
+  emotion:
+    enabled: false
+    backend: cnn
+    model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
+  llm:
+    enabled: false
+    model_id: "Qwen/Qwen2-0.5B-Instruct"
+    max_new_tokens: 32
+    repetition_penalty: 1.1
+    no_repeat_ngram_size: 2
+
+training:
+  batch_size: 1
+  gradient_accumulation_steps: 4
+  learning_rate: 2e-5
+  num_epochs: 3
+  warmup_ratio: 0.1
+  weight_decay: 0.01
+  use_cpu: true
+
+alm_cnn:
+  use_in_inference: auto
+  sed_checkpoint: outputs/sed_cnn.pt
+  emotion_checkpoint: outputs/emotion_cnn.pt
+  merged_checkpoint: outputs/alm_cnn_merged.pt
+  sed_metrics_json: outputs/sed_metrics.json
+  emotion_metrics_json: outputs/emotion_metrics.json
+  merged_metrics_json: outputs/alm_cnn_merged_metrics.json

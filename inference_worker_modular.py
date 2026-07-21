@@ -61,17 +61,23 @@ def main():
         import torch
         import yaml
 
+        from src.config_path import low_memory_mode, resolve_config_path
+
         try:
-            threads = min(4, max(1, (os.cpu_count() or 4) // 2))
+            if low_memory_mode():
+                threads = 1
+            else:
+                threads = min(4, max(1, (os.cpu_count() or 4) // 2))
             torch.set_num_threads(threads)
-            torch.set_num_interop_threads(threads)
+            torch.set_num_interop_threads(1 if low_memory_mode() else threads)
         except Exception:
             pass
 
         from src.pipeline import run_alm_lite
         from src.utils import load_audio_from_file
 
-        config_path = BASE / "config.yaml"
+        config_path = resolve_config_path(BASE)
+        _stage(f"config={config_path.name}")
         with open(config_path, "r") as f:
             cfg = yaml.safe_load(f)
 
@@ -188,6 +194,16 @@ def main():
             "upload_name": upload_name,
         })
         _stage("done")
+        # Drop peak RAM before process exit (helps Render memory metrics / next request).
+        try:
+            del result, audio, wav_np
+            import gc
+
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            pass
     except Exception as e:
         write_out({"ok": False, "error": f"{type(e).__name__}: {str(e)}"})
         sys.exit(1)

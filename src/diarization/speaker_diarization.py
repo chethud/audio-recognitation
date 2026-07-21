@@ -18,12 +18,21 @@ from src.diarization.types import DiarizationResult
 
 logger = logging.getLogger(__name__)
 
-_CONFIG_PATH = Path(__file__).resolve().parents[2] / "config.yaml"
+_CONFIG_PATH = None
+
+
+def _config_path():
+    global _CONFIG_PATH
+    if _CONFIG_PATH is None:
+        from src.config_path import resolve_config_path
+
+        _CONFIG_PATH = resolve_config_path(Path(__file__).resolve().parents[2])
+    return _CONFIG_PATH
 
 
 def _load_diarization_cfg() -> dict[str, Any]:
     try:
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
+        with open(_config_path(), encoding="utf-8") as f:
             return yaml.safe_load(f).get("alm_lite", {}).get("diarization", {}) or {}
     except Exception:
         return {}
@@ -46,7 +55,7 @@ def _build_whisperx_pipeline(cfg: dict[str, Any]):
 
     alm = {}
     try:
-        with open(_CONFIG_PATH, encoding="utf-8") as f:
+        with open(_config_path(), encoding="utf-8") as f:
             alm = yaml.safe_load(f).get("alm_lite", {}) or {}
     except Exception:
         pass
@@ -82,7 +91,7 @@ def warmup_diarization() -> bool:
 
             alm = {}
             try:
-                with open(_CONFIG_PATH, encoding="utf-8") as f:
+                with open(_config_path(), encoding="utf-8") as f:
                     alm = yaml.safe_load(f).get("alm_lite", {}) or {}
             except Exception:
                 pass
@@ -218,7 +227,7 @@ def run_diarized_transcription(
 
             alm = {}
             try:
-                with open(_CONFIG_PATH, encoding="utf-8") as f:
+                with open(_config_path(), encoding="utf-8") as f:
                     alm = yaml.safe_load(f).get("alm_lite", {}) or {}
             except Exception:
                 pass

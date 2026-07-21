@@ -16,8 +16,10 @@ configure_ml_env()
 
 logger = logging.getLogger(__name__)
 
+from src.config_path import resolve_config_path
+
 BASE = Path(__file__).resolve().parent.parent
-CONFIG_PATH = BASE / "config.yaml"
+CONFIG_PATH = resolve_config_path(BASE)
 
 _lock = __import__("threading").Lock()
 _warmed = False

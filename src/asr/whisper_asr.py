@@ -862,9 +862,9 @@ def transcribe_bilingual(
     # Kannada (and other language-specific checkpoints) → native script.
     try:
         import yaml
-        from pathlib import Path
+        from src.config_path import resolve_config_path
 
-        cfg_path = Path(__file__).resolve().parents[2] / "config.yaml"
+        cfg_path = resolve_config_path(Path(__file__).resolve().parents[2])
         with open(cfg_path, encoding="utf-8") as f:
             asr_cfg = (yaml.safe_load(f) or {}).get("alm_lite", {}).get("asr", {}) or {}
         lang_models = asr_cfg.get("language_models") or {}

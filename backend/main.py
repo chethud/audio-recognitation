@@ -42,6 +42,7 @@ from backend.models import (
     SignupRequest,
     UserPublic,
 )
+from src.config_path import low_memory_mode, resolve_config_path
 
 _auth_bearer = HTTPBearer(auto_error=False)
 
@@ -79,13 +80,13 @@ app = FastAPI(
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 BASE = Path(__file__).parent.parent
-CONFIG_PATH = BASE / "config.yaml"
+CONFIG_PATH = resolve_config_path(BASE)
 WORKER_SCRIPT_MODULAR = BASE / "inference_worker_modular.py"
 
-# Limits (no audio length limit; full file is analyzed)
-MAX_FILE_SIZE_MB = 500
+# Limits (audio still capped by config data.max_audio_length_sec on Render)
+MAX_FILE_SIZE_MB = 80 if low_memory_mode() else 500
 MAX_QUESTION_LEN = 1000
-INFERENCE_TIMEOUT_SEC = 3600  # 1 hour for long files (full-file analysis)
+INFERENCE_TIMEOUT_SEC = 900 if low_memory_mode() else 3600
 ALLOWED_EXTENSIONS = {".wav", ".mp3", ".flac", ".ogg", ".m4a", ".mp4", ".mkv", ".webm", ".avi", ".mov"}
 
 
@@ -150,10 +151,10 @@ def _worker_env(
         "HF_HUB_DISABLE_PROGRESS_BARS": "1",
         "TRANSFORMERS_VERBOSITY": "error",
         "TOKENIZERS_PARALLELISM": "false",
-        "OMP_NUM_THREADS": "2",
-        "MKL_NUM_THREADS": "2",
-        "OPENBLAS_NUM_THREADS": "2",
-        "NUMEXPR_NUM_THREADS": "2",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
         "PYTHONIOENCODING": "utf-8",
         "PYTHONUTF8": "1",
         "ALM_ASR_LANGUAGE": (language or "").strip(),
@@ -163,8 +164,11 @@ def _worker_env(
         "ALM_AUDIO_BYTES": str(int(audio_bytes) if audio_bytes is not None else ""),
         # No transcript/result memoization. Model weights may stay in memory.
         "ALM_DISABLE_TRANSCRIPT_CACHE": "1",
-        # Enable CTranslate2 (faster-whisper) for stable, fast Kannada CPU ASR in the worker.
-        "ALM_ENABLE_CT2": os.environ.get("ALM_ENABLE_CT2", "1"),
+        # CT2 off on Render low-memory by default (extra model copy).
+        "ALM_ENABLE_CT2": os.environ.get(
+            "ALM_ENABLE_CT2",
+            "0" if low_memory_mode() else "1",
+        ),
     }
     ffmpeg = os.environ.get("IMAGEIO_FFMPEG_EXE", "").strip()
     if not ffmpeg:

@@ -10,12 +10,13 @@ from typing import Any, Optional
 import torch
 import yaml
 
+from src.config_path import resolve_config_path
 from training.data_utils import MelSpecCNN
 
 logger = logging.getLogger(__name__)
 
 BASE = Path(__file__).resolve().parent.parent.parent
-CONFIG_PATH = BASE / "config.yaml"
+CONFIG_PATH = resolve_config_path(BASE)
 
 _lock = threading.Lock()
 _sed_bundle: Optional[dict[str, Any]] = None

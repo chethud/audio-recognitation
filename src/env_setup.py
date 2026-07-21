@@ -26,17 +26,28 @@ def _ensure_ffmpeg_on_path() -> None:
 
 
 def configure_ml_env() -> None:
-    # Programmatically force HuggingFace to use the local project cache folder where models are pre-downloaded.
-    # This prevents internet connection attempts and ensures offline model loading works correctly.
+    # Prefer project-local HF cache. On Render, allow downloads (ephemeral disk / lean models).
     src_dir = Path(__file__).resolve().parent
     workspace_root = src_dir.parent
     local_hf_cache = workspace_root / ".cache" / "huggingface"
-    
-    # Always set these so offline mode works regardless of shell env
-    os.environ["HF_HOME"] = str(local_hf_cache)
-    os.environ["HF_HUB_CACHE"] = str(local_hf_cache / "hub")
-    os.environ["HF_HUB_OFFLINE"] = "1"
-    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+    on_render = (os.environ.get("RENDER") or "").strip().lower() in ("1", "true", "yes")
+    allow_download = on_render or (os.environ.get("ALM_ALLOW_HF_DOWNLOAD") or "").strip().lower() in (
+        "1",
+        "true",
+        "yes",
+    )
+
+    os.environ.setdefault("HF_HOME", str(local_hf_cache))
+    os.environ.setdefault("HF_HUB_CACHE", str(Path(os.environ["HF_HOME"]) / "hub"))
+    if allow_download:
+        os.environ["HF_HUB_OFFLINE"] = "0"
+        os.environ["TRANSFORMERS_OFFLINE"] = "0"
+    else:
+        # Local: prefer offline when models are already cached.
+        os.environ["HF_HOME"] = str(local_hf_cache)
+        os.environ["HF_HUB_CACHE"] = str(local_hf_cache / "hub")
+        os.environ["HF_HUB_OFFLINE"] = "1"
+        os.environ["TRANSFORMERS_OFFLINE"] = "1"
 
     os.environ.setdefault("TRANSFORMERS_NO_TF", "1")
     os.environ.setdefault("USE_TF", "0")
@@ -45,7 +56,7 @@ def configure_ml_env() -> None:
     os.environ.setdefault("HF_HUB_DISABLE_PROGRESS_BARS", "1")
     os.environ.setdefault("TRANSFORMERS_VERBOSITY", "error")
     os.environ.setdefault("TOKENIZERS_PARALLELISM", "false")
-    # Fewer OpenMP/MKL threads — reduces native crashes with torch+Whisper on Windows.
+    # Single-thread BLAS/OpenMP — lower RAM + fewer native crashes on Windows/Render.
     os.environ.setdefault("OMP_NUM_THREADS", "1")
     os.environ.setdefault("MKL_NUM_THREADS", "1")
     os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
