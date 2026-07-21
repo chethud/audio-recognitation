@@ -59,7 +59,7 @@ Use **Python 3.11** (WhisperX does not support 3.14). The Docker image already u
    python -m training.run_notebook_pipeline --quick --batch-size 2
    ```
 
-4. Copy your API URL, e.g. `https://alm-lite-api.onrender.com`
+4. Copy your API URL, e.g. `https://audio-recognitation-1.onrender.com`
 5. Test: `https://YOUR-URL.onrender.com/health` → `"model_ready": true`
 
 ---
@@ -74,7 +74,7 @@ Use **Python 3.11** (WhisperX does not support 3.14). The Docker image already u
    - **Build Command:** `npm run build`
    - **Output Directory:** `dist`
 4. **Environment Variables** → Production:
-   - `VITE_API_BASE` = `https://YOUR-RENDER-URL.onrender.com` (no trailing slash)
+   - `VITE_API_BASE` = `https://audio-recognitation-1.onrender.com` (no trailing slash; match your Render service URL)
 5. **Deploy**
 6. Open your Vercel URL (e.g. `https://audio-recognitation.vercel.app`)
 

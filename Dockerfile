@@ -18,7 +18,9 @@ COPY . .
 ENV PYTHONUNBUFFERED=1 \
     TORCHDYNAMO_DISABLE=1 \
     HF_HOME=/app/.cache/huggingface \
-    HF_TOKEN=""
+    HF_TOKEN="" \
+    ALM_SUBPROCESS_INFERENCE=1 \
+    ALM_ENABLE_CT2=0
 
 EXPOSE 8000
 

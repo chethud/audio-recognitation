@@ -23,5 +23,9 @@ services:
         value: "1"
       - key: HF_HOME
         value: /app/.cache/huggingface
+      - key: ALM_SUBPROCESS_INFERENCE
+        value: "1"
+      - key: ALM_ENABLE_CT2
+        value: "0"
       - key: HF_TOKEN
         sync: false

@@ -1,0 +1,95 @@
+ALM-Lite — Run on another laptop after cloning GitHub
+======================================================
+
+Repo: https://github.com/chethud/audio-recognitation
+
+
+1. Clone
+--------
+
+git clone https://github.com/chethud/audio-recognitation.git
+cd audio-recognitation
+
+
+2. Install tools
+----------------
+
+- Python 3.11 (do NOT use Python 3.14)
+- Node.js 18 or newer
+- Git
+- Optional: Hugging Face token (HF_TOKEN) for WhisperX / PyAnnote diarization
+
+
+3. Backend setup
+----------------
+
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+
+$env:PIP_CACHE_DIR = "$PWD\.pip-cache"
+.\.venv\Scripts\pip.exe install --upgrade pip
+.\.venv\Scripts\pip.exe install -r requirements.txt
+
+
+4. Frontend setup
+-----------------
+
+cd frontend
+npm install
+cd ..
+
+Make sure frontend/.env.development contains:
+
+VITE_DEV_API_PROXY=http://127.0.0.1:8002
+
+
+5. Run locally
+--------------
+
+Open TWO PowerShell windows from the project root.
+
+Terminal 1 — API:
+
+$env:HF_HOME = "$PWD\.cache\huggingface"
+$env:ALM_SUBPROCESS_INFERENCE = "1"
+$env:ALM_ENABLE_CT2 = "0"
+.\.venv\Scripts\python.exe run.py --host 127.0.0.1 --port 8002
+
+Terminal 2 — UI:
+
+cd frontend
+npm run dev -- --host --port 5173
+
+
+6. Open the app
+---------------
+
+App:    http://localhost:5173/
+Health: http://127.0.0.1:8002/health
+
+Wait until health returns: {"status":"ok","model_ready":true}
+
+First start downloads models into .cache\huggingface (needs internet and disk space).
+Wait 1–2 minutes before uploading audio.
+
+
+Optional — diarization extras
+-----------------------------
+
+Accept terms for: https://huggingface.co/pyannote/speaker-diarization-3.1
+
+$env:HF_TOKEN = "hf_your_token"
+.\setup-diarization.ps1
+
+
+Later updates on that laptop
+----------------------------
+
+cd audio-recognitation
+git pull
+.\.venv\Scripts\pip.exe install -r requirements.txt
+cd frontend
+npm install
+cd ..
+
+Then run step 5 again.

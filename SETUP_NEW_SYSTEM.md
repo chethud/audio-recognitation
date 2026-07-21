@@ -8,8 +8,8 @@ This guide provides step-by-step instructions on how to set up, configure, and r
 
 Before setting up the project, ensure the new system has the following installed:
 
-1. **Python 3.10 or 3.11:** 
-   * Avoid Python 3.12+ for now as some older binary wheels for dependencies (e.g., specific PyTorch or Librosa helpers) might require compile tools.
+1. **Python 3.11:** 
+   * Use Python 3.11 only. Do **not** use Python 3.14 (WhisperX / several audio deps fail). Prefer `py -3.11` on Windows.
    * Make sure Python is added to the system PATH.
 2. **Node.js (v18 or newer) & npm:** 
    * Required for running and building the Vite/React frontend.
@@ -42,13 +42,13 @@ Creating a virtual environment ensures that the project dependencies do not conf
 
 **On Windows:**
 ```powershell
-python -m venv .venv
-.venv\Scripts\Activate.ps1
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 ```
 
 **On macOS / Linux:**
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 source .venv/bin/activate
 ```
 
