@@ -3,6 +3,7 @@
 data/datasets/
 data/alm.db
 outputs/*.pt
+!outputs/emotion_cnn.pt
 outputs/checkpoints/
 __pycache__/
 *.pyc

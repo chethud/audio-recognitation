@@ -11,7 +11,7 @@ import torch
 
 from src.asr import transcribe_bilingual
 from src.context_builder import build_structured_context
-from src.emotion import predict_emotion_from_audio
+from src.emotion import predict_emotion_from_audio, predict_emotions_per_speaker
 from src.reasoning import answer_from_context_fast, answer_question_from_context
 from src.sed import detect_sound_events_segmented
 
@@ -160,35 +160,41 @@ def run_alm_lite(
 
     if fast_mode:
         llm_enabled = False
-        # On Windows, HF AST + emotion stacked with Whisper often segfaults.
-        # Keep lightweight CNN SED when checkpoints exist; still skip emotion.
+        # Prefer lightweight CNN for SED/emotion. Do NOT force emotion off —
+        # that made the UI always show "neutral".
         import sys
 
-        if sys.platform == "win32":
-            emotion_enabled = False
-            if sed_enabled:
-                from src.cnn.loader import should_use_cnn
+        from src.cnn.loader import should_use_cnn
 
+        cnn_ok = should_use_cnn()
+        if sys.platform == "win32":
+            # HF wav2vec2 + Whisper often segfaults on Windows; CNN is safe.
+            if emotion_enabled:
+                if cnn_ok and emotion_backend.lower() in ("auto", "cnn"):
+                    emotion_backend = "cnn"
+                elif emotion_backend.lower() in ("hf", "wav2vec2", "huggingface"):
+                    # Keep HF only when explicitly requested.
+                    pass
+                elif cnn_ok:
+                    emotion_backend = "cnn"
+                else:
+                    # No CNN weights: still try HF rather than fake "neutral".
+                    emotion_backend = "hf"
+            if sed_enabled:
                 configured_backend = str(sed_backend).lower()
                 if should_use_cnn() and configured_backend in ("auto", "cnn"):
-                    # Pure CNN only when explicitly configured or auto without AST.
                     sed_backend = "cnn"
                 elif configured_backend in ("hybrid", "both"):
-                    # Hybrid allowed — CNN + AST gives much better detection coverage.
                     sed_backend = "hybrid"
                 elif should_use_cnn():
                     sed_backend = "cnn"
                 else:
-                    # No local CNN weights → leave SED off rather than loading AST.
                     sed_enabled = False
-            else:
-                sed_enabled = False
         else:
-            from src.cnn.loader import should_use_cnn
-
-            cnn_emotion = should_use_cnn() and emotion_backend.lower() in ("auto", "cnn")
-            if not cnn_emotion:
-                emotion_enabled = False
+            if emotion_enabled and emotion_backend.lower() in ("auto", "cnn") and cnn_ok:
+                emotion_backend = "cnn"
+            elif emotion_enabled and emotion_backend.lower() in ("auto", "cnn") and not cnn_ok:
+                emotion_backend = "hf"
 
     emo_id = emotion_model_id or "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
     dia_cfg = diarization_cfg or {}
@@ -356,6 +362,26 @@ def run_alm_lite(
         else (transcript or "")
     )
 
+    speaker_emotions: dict[str, str] = {}
+    if emotion_enabled and speaker_turns:
+        try:
+            speaker_emotions = predict_emotions_per_speaker(
+                audio,
+                speaker_turns,
+                sample_rate=sample_rate,
+                model_id=emo_id,
+                device=dev,
+                enabled=True,
+                backend=emotion_backend,
+            )
+        except Exception as exc:
+            import logging
+
+            logging.getLogger(__name__).warning("Per-speaker emotion failed: %s", exc)
+    if not speaker_emotions and emotion_label:
+        for sp in (speakers or ["Speaker 1"]):
+            speaker_emotions[sp] = emotion_label
+
     return {
         "transcript": transcript,
         "transcript_original": transcript_original,
@@ -369,6 +395,7 @@ def run_alm_lite(
         "formatted_transcript": formatted,
         "sound_events": sound_events,
         "emotion": emotion_label,
+        "speaker_emotions": speaker_emotions,
         "context": context,
         "answer": answer,
         "summary": answer,

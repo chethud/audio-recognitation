@@ -742,6 +742,7 @@ async def analyze(
         if isinstance(e, dict) and e.get("label")
     ]
     emotion = result.get("emotion", "") or "neutral"
+    speaker_emotions = result.get("speaker_emotions") or {}
     speaker_turns = result.get("speaker_turns") or []
     num_speakers = int(result.get("num_speakers") or 0)
     detected_speakers = result.get("detected_speakers") or []
@@ -752,6 +753,9 @@ async def analyze(
             if sp and sp not in seen:
                 seen.append(sp)
         detected_speakers = seen
+    if not speaker_emotions and emotion:
+        for sp in (detected_speakers or ["Speaker 1"]):
+            speaker_emotions[sp] = emotion
     formatted_transcript = result.get("formatted_transcript") or ""
     summary = result.get("summary") or answer
 
@@ -779,6 +783,7 @@ async def analyze(
         sounds=sounds,
         sound_details=sound_details,
         emotion=emotion,
+        speaker_emotions=speaker_emotions,
         answer=answer,
         question=question.strip(),
         audio_filename=file.filename,

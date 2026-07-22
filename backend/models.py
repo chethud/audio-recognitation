@@ -40,6 +40,7 @@ class AnalyzeResponse(BaseModel):
     sounds: List[str] = []
     sound_details: List[dict] = []
     emotion: str = ""
+    speaker_emotions: dict = {}
     answer: str = ""
     question: str = ""
     audio_filename: str = ""

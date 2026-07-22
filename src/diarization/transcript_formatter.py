@@ -53,9 +53,14 @@ def format_conversation_transcript(turns: list[dict[str, Any]]) -> str:
 def format_speaker_emotion_block(
     speakers: list[str],
     emotion: str,
+    speaker_emotions: dict[str, str] | None = None,
 ) -> str:
-    """Per-speaker emotion lines (clip-level emotion until per-speaker exists)."""
-    label = (emotion or "neutral").strip() or "neutral"
-    if not speakers:
-        return f"Speaker 1:\n{label}"
-    return "\n\n".join(f"{sp}:\n{label}" for sp in speakers)
+    """Per-speaker emotion lines (uses per-speaker map when available)."""
+    emo_map = speaker_emotions or {}
+    fallback = (emotion or "neutral").strip() or "neutral"
+    names = speakers or list(emo_map.keys()) or ["Speaker 1"]
+    lines = []
+    for sp in names:
+        label = (emo_map.get(sp) or fallback).strip() or fallback
+        lines.append(f"{sp}:\n{label}")
+    return "\n\n".join(lines)

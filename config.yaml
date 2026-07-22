@@ -16,7 +16,7 @@ data:
 
 # --- ALM-Lite: full AI pipeline (ASR + SED + emotion + LLM), speed-optimized ---
 alm_lite:
-  fast_mode: true   # local: ASR + CNN SED; emotion/LLM off (avoids heavy HF models)
+  fast_mode: true   # local: ASR + CNN SED + CNN emotion; LLM off
   store_uploaded_audio: false
   parallel_inference: false   # true can crash on Windows CPU; enable when stable
   asr:
@@ -57,8 +57,8 @@ alm_lite:
     max_windows: 16
     max_results: 12
   emotion:
-    enabled: false   # off on Windows for stability (CNN/HF both crash-prone with Whisper)
-    backend: cnn   # lightweight local CNN when checkpoints exist
+    enabled: true
+    backend: cnn   # local MelSpec CNN (outputs/emotion_cnn.pt); falls back to HF if missing
     model_id: "ehcalabres/wav2vec2-lg-xlsr-en-speech-emotion-recognition"
   llm:
     enabled: false

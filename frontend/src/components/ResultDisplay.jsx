@@ -174,6 +174,7 @@ export default function ResultDisplay({
     sounds,
     sound_details,
     emotion,
+    speaker_emotions,
     answer,
     summary,
     language,
@@ -214,6 +215,10 @@ export default function ResultDisplay({
       : speakersFromTurns;
 
   const hasTurns = turns.length > 0;
+  const emotionMap =
+    speaker_emotions && typeof speaker_emotions === "object"
+      ? speaker_emotions
+      : {};
   const emotionLabel = (emotion || "neutral").trim() || "neutral";
   const summaryText = (summary || answer || "").trim() || "—";
 
@@ -330,12 +335,16 @@ export default function ResultDisplay({
       accent: "violet",
       content: (
         <div className="space-y-3 text-sm sm:text-base">
-          {(speakers.length > 0 ? speakers : ["Speaker 1"]).map((sp) => (
-            <div key={sp}>
-              <p className="text-violet-200/90 font-semibold mb-0.5">{sp}:</p>
-              <p className="text-slate-100 capitalize">{emotionLabel}</p>
-            </div>
-          ))}
+          {(speakers.length > 0 ? speakers : ["Speaker 1"]).map((sp) => {
+            const label =
+              (emotionMap[sp] || emotionLabel || "neutral").trim() || "neutral";
+            return (
+              <div key={sp}>
+                <p className="text-violet-200/90 font-semibold mb-0.5">{sp}:</p>
+                <p className="text-slate-100 capitalize">{label}</p>
+              </div>
+            );
+          })}
         </div>
       ),
     },

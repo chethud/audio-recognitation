@@ -87,7 +87,7 @@ def cnn_checkpoints_exist(cfg: Optional[dict] = None) -> bool:
         return True
     sed = _resolve(cnn.get("sed_checkpoint", "outputs/sed_cnn.pt"))
     emo = _resolve(cnn.get("emotion_checkpoint", "outputs/emotion_cnn.pt"))
-    return sed.is_file() and emo.is_file()
+    return sed.is_file() or emo.is_file()
 
 
 def should_use_cnn(cfg: Optional[dict] = None) -> bool:

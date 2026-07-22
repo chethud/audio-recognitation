@@ -259,6 +259,7 @@ def analyze_file(audio_path: str, question: str, language: Optional[str] = None)
                 "detected_speakers": result.get("detected_speakers", []),
                 "sound_events": result["sound_events"],
                 "emotion": result.get("emotion", "neutral"),
+                "speaker_emotions": result.get("speaker_emotions") or {},
                 "context": result["context"],
                 "wav_sha256": "",
                 "audio_sha256": (os.environ.get("ALM_AUDIO_SHA256") or "").strip(),

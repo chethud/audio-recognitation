@@ -187,6 +187,7 @@ def main():
             "detected_speakers": result.get("detected_speakers", []),
             "sound_events": result["sound_events"],
             "emotion": result.get("emotion", "neutral"),
+            "speaker_emotions": result.get("speaker_emotions") or {},
             "context": result["context"],
             "audio_sha256": file_sha,
             "wav_sha256": wav_sha,
